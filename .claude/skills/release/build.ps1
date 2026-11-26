@@ -30,6 +30,10 @@ Invoke-Editor 'script eval' @('--code', 'UnityEditor.AssetDatabase.Refresh(); re
 do { Start-Sleep 3; $console = Invoke-Editor 'console status' } while ($console.groundTruth.compiling)
 if ($console.groundTruth.compilationFailed) { throw 'C# compilation failed. See: unity command --project-path . "console get" --level error' }
 
+# Releases are Direct3D 11 builds: refuse to build with any other graphics API setting.
+$apis = Invoke-Editor 'script eval' @('--code', 'var t = UnityEditor.BuildTarget.StandaloneWindows64; return UnityEditor.PlayerSettings.GetUseDefaultGraphicsAPIs(t) + " " + string.Join(",", UnityEditor.PlayerSettings.GetGraphicsAPIs(t));')
+if ("$apis" -notmatch 'False Direct3D11(?![,\w])') { throw "Windows graphics APIs must be Direct3D11 only (auto off). Got (auto, APIs): $apis" }
+
 $player = Join-Path $outDir 'win64'
 $queued = Invoke-Editor 'build run' @('--target', 'StandaloneWindows64', '--output-path', "$player\metro.exe", '--confirm', 'true')
 do {
@@ -50,6 +54,7 @@ Stop-Process -Id $game.Id -Confirm:$false
 $game.WaitForExit()
 $errors = Select-String -Path $log -Pattern 'Exception' | Select-Object -First 10
 if ($errors) { throw "Exceptions in ${log}:`n$($errors.Line -join "`n")" }
+if (-not (Select-String -Path $log -Pattern 'Direct3D 11\.' -Quiet)) { throw "The game did not start on Direct3D 11. See $log" }
 
 $stage = Join-Path $outDir 'metro'
 New-Item -ItemType Directory $stage | Out-Null

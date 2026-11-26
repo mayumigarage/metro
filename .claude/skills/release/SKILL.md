@@ -8,6 +8,8 @@ description: metro の Windows 版をビルドして GitHub リリースに出�
 Windows 64bit 版を CLI でビルドし、zip を GitHub リリース (`gh`) に添付する。
 前提: Unity エディタがこのプロジェクトを開いている (`unity status`。なければ `unity open .`)、`gh auth status` が通る。
 
+**リリースは常に DirectX 11 版**: Windows の Graphics APIs は Direct3D11 のみ (Auto はオフ、`ProjectSettings.asset` にコミット済み)。`build.ps1` がビルド前の設定と起動ログの両方を確認し、違えば失敗する。失敗しても確認を外さず、設定を戻す。リリースノートにも DirectX 11 版と書く。
+
 ## 手順
 
 1. **状態確認**: `git status -sb`、`git fetch`、`gh release list`。
