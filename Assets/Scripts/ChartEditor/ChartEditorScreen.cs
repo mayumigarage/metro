@@ -107,6 +107,8 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
     private float clapVolume = 0.6f;
     private bool metronomeEnabled;
     private float metronomeVolume = 0.6f;
+    private bool guideEnabled;
+    private float guideVolume = 0.8f;
     private bool freeLaserValues;
     private float previewLookAhead = 1.2f;
     private bool returnOnStop = true;
@@ -359,6 +361,8 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         playback.ClapVolume = clapVolume;
         playback.MetronomeEnabled = metronomeEnabled;
         playback.MetronomeVolume = metronomeVolume;
+        playback.GuideEnabled = guideEnabled;
+        playback.GuideVolume = guideVolume;
     }
 
     // ------------------------------------------------------------------ files
@@ -632,6 +636,7 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         SongChartData chart = Chart;
         chart.notes ??= new TapNoteData[0];
         chart.lasers ??= new LaserNoteData[0];
+        chart.guides ??= new double[0];
         Array.Sort(chart.notes, (left, right) => left.time != right.time ? left.time.CompareTo(right.time) : left.lane.CompareTo(right.lane));
 
         LaserPointData selected = selectedLaser != null && selectedPoint >= 0 && selectedPoint < selectedLaser.points.Length
@@ -2780,6 +2785,7 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         DrawWaveform(size, bottom, top);
         DrawGrid(bottom, top);
         DrawSecondsRuler(bottom, top);
+        DrawGuideBeats(bottom, top);
 
         // Song end / audio end
         if (audioClip != null)

@@ -138,6 +138,10 @@ public sealed partial class ChartEditorScreen
     [NonSerialized] private Dialog helpDialog;
     [NonSerialized] private Dialog renameDialog;
     [NonSerialized] private Dialog generateDialog;
+    [NonSerialized] private Dialog guideDialog;
+    private int guideSensitivity = 5;
+    private int guideSnap = 4;
+    private static readonly Color GuideColor = new Color(0.45f, 1f, 0.45f, 0.75f);
     [NonSerialized] private readonly ChartAutoGenerator.Settings generateSettings = new ChartAutoGenerator.Settings { seed = Environment.TickCount & 0xFFFF };
     [NonSerialized] private bool generateReplace = true;
     [NonSerialized] private bool generateFromAudio = true;
@@ -211,6 +215,11 @@ public sealed partial class ChartEditorScreen
         clapVolume = PlayerPrefs.GetFloat("ChartEditor.NoteSoundVolume", 0.6f);
         metronomeEnabled = PlayerPrefs.GetInt("ChartEditor.Metronome", 0) == 1;
         metronomeVolume = PlayerPrefs.GetFloat("ChartEditor.MetronomeVolume", 0.6f);
+        guideEnabled = PlayerPrefs.GetInt("ChartEditor.Guide", 0) == 1;
+        guideVolume = PlayerPrefs.GetFloat("ChartEditor.GuideVolume", 0.8f);
+        guideSensitivity = PlayerPrefs.GetInt("ChartEditor.GuideSensitivity", 5);
+        guideSnap = PlayerPrefs.GetInt("ChartEditor.GuideSnap", 4);
+        ApplyGuidePreview();
     }
 
     private void SaveLayout()
@@ -227,6 +236,11 @@ public sealed partial class ChartEditorScreen
         PlayerPrefs.SetFloat("ChartEditor.NoteSoundVolume", clapVolume);
         PlayerPrefs.SetInt("ChartEditor.Metronome", metronomeEnabled ? 1 : 0);
         PlayerPrefs.SetFloat("ChartEditor.MetronomeVolume", metronomeVolume);
+        PlayerPrefs.SetInt("ChartEditor.Guide", guideEnabled ? 1 : 0);
+        PlayerPrefs.SetFloat("ChartEditor.GuideVolume", guideVolume);
+        PlayerPrefs.SetInt("ChartEditor.GuideSensitivity", guideSensitivity);
+        PlayerPrefs.SetInt("ChartEditor.GuideSnap", guideSnap);
+        ApplyGuidePreview();
     }
 
     private void ToggleNoteSound()
@@ -435,12 +449,14 @@ public sealed partial class ChartEditorScreen
         }
 
         infoDialog = new Dialog { Title = "譜面情報", Rect = new Rect(120f, 60f, 460f, 760f), Body = DrawInfoDialog };
-        playDialog = new Dialog { Title = "再生設定", Rect = new Rect(160f, 120f, 320f, 250f), Body = DrawPlayDialog };
+        playDialog = new Dialog { Title = "再生設定", Rect = new Rect(160f, 120f, 320f, 290f), Body = DrawPlayDialog };
         helpDialog = new Dialog { Title = "操作一覧", Rect = new Rect(200f, 110f, 560f, 470f), Body = DrawHelpDialog };
         renameDialog = new Dialog { Title = "譜面名・アーティスト", Rect = new Rect(220f, 140f, 380f, 200f), Body = DrawRenameDialog };
+        guideDialog = new Dialog { Title = "ガイド拍の生成", Rect = new Rect(260f, 140f, 380f, 270f), Body = DrawGuideDialog };
         generateDialog = new Dialog { Title = "自動生成（下書き）", Rect = new Rect(240f, 120f, 380f, 440f), Body = DrawGenerateDialog };
         dialogs.Clear();
         dialogs.Add(generateDialog);
+        dialogs.Add(guideDialog);
         dialogs.Add(renameDialog);
         dialogs.Add(infoDialog);
         dialogs.Add(playDialog);
@@ -450,6 +466,8 @@ public sealed partial class ChartEditorScreen
         {
             Item("譜面情報…", "I", () => infoDialog.Open = !infoDialog.Open, null, () => infoDialog.Open),
             Item("自動生成…", string.Empty, OpenGenerateDialog),
+            Item("ガイド拍を生成…", string.Empty, () => guideDialog.Open = true),
+            Item("ガイド拍を消去", string.Empty, ClearGuides, () => Chart.guides.Length > 0),
             Separator,
             Item("オフセットを再生位置にする", string.Empty, () =>
             {
@@ -563,6 +581,7 @@ public sealed partial class ChartEditorScreen
                     Item("音楽を鳴らす", string.Empty, () => musicEnabled = !musicEnabled, null, () => musicEnabled),
                     Item("ノーツ音を鳴らす", string.Empty, ToggleNoteSound, null, () => clapEnabled),
                     Item("メトロノーム", "T", ToggleMetronome, null, () => metronomeEnabled),
+                    Item("ガイド拍（音と線）", "U", ToggleGuide, null, () => guideEnabled),
                     Item("停止で開始位置に戻る", string.Empty, () => returnOnStop = !returnOnStop, null, () => returnOnStop),
                     Item("全画面プレビューをオートプレイ", string.Empty, () => GameSettings.AutoPlay = !GameSettings.AutoPlay, () => !flow.IsEmbeddedPreview, () => GameSettings.AutoPlay),
                     Separator,
@@ -844,6 +863,11 @@ public sealed partial class ChartEditorScreen
         if (GUILayout.Toggle(clapEnabled, new GUIContent("ノーツ音", "再生中にノーツの位置で音を鳴らす"), EditorStyles.miniButton, GUILayout.Width(60f)) != clapEnabled)
         {
             Defer(ToggleNoteSound);
+        }
+
+        if (GUILayout.Toggle(guideEnabled, new GUIContent("ガイド音", "ガイド拍を音と全レーンの線で出す (U)。生成は 譜面 > ガイド拍を生成…"), EditorStyles.miniButton, GUILayout.Width(60f)) != guideEnabled)
+        {
+            Defer(ToggleGuide);
         }
 
         GUIStyle timeStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter };
@@ -1957,6 +1981,21 @@ public sealed partial class ChartEditorScreen
                 EditorGUI.DrawRect(new Rect(lanes.x, y, lanes.width, 1f), new Color(1f, 1f, 1f, index % 4 == 0 ? 0.2f : 0.07f));
             }
 
+            // Guide beats across all four lanes
+            if (guideEnabled)
+            {
+                foreach (double time in Chart.guides)
+                {
+                    if (time < cursorTime || time > cursorTime + lookAhead)
+                    {
+                        continue;
+                    }
+
+                    float y = judgeY - (float)((time - cursorTime) / lookAhead) * span;
+                    EditorGUI.DrawRect(new Rect(lanes.x, y - 1f, lanes.width, 2f), GuideColor);
+                }
+            }
+
             // Hit flashes on lanes whose note has just been passed
             if (playback.IsPlaying || flow.IsEmbeddedPreview)
             {
@@ -2264,14 +2303,8 @@ public sealed partial class ChartEditorScreen
         settings.audio = null;
         if (generateFromAudio && AudioImport.CanReadSamples(audioClip))
         {
-            if (generateAnalysisClip != audioClip)
-            {
-                generateAnalysis = ChartAudioAnalysis.FromClip(audioClip);
-                generateAnalysisClip = generateAnalysis != null ? audioClip : null;
-            }
-
-            settings.audio = generateAnalysis;
-            if (generateAnalysis == null)
+            settings.audio = AnalyzeAudio();
+            if (settings.audio == null)
             {
                 Notify("音源を解析できなかったので、パターンだけで並べます");
             }
@@ -2308,6 +2341,140 @@ public sealed partial class ChartEditorScreen
         Notify((settings.audio != null ? "自動生成（音源）: ノーツ " : "自動生成: ノーツ ") + result.Notes.Count + " / レーザー " + result.Lasers.Count + "（" + settings.firstMeasure + "〜" + settings.lastMeasure + " 小節）");
     }
 
+    // ------------------------------------------------------------------ guide beats
+
+    private void ApplyGuidePreview()
+    {
+        GuideBeatView.Visible = guideEnabled;
+        GuideBeatView.Volume = guideVolume;
+    }
+
+    private void ToggleGuide()
+    {
+        guideEnabled = !guideEnabled;
+        SaveLayout();
+        if (guideEnabled && Chart.guides.Length == 0)
+        {
+            guideDialog.Open = true;
+        }
+    }
+
+    private void DrawGuideDialog()
+    {
+        GUIStyle note = new GUIStyle(EditorStyles.wordWrappedMiniLabel);
+        GUILayout.Label("曲の音の立ち上がりを拾って、手で叩くようなタイミングだけの目安を作ります。ノーツは置きません。", note);
+        GUILayout.Space(6f);
+        guideSensitivity = EditorGUILayout.IntSlider("細かさ", guideSensitivity, 1, 10);
+        GUILayout.Space(4f);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("拍に揃える", GUILayout.Width(70f));
+        foreach ((int division, string label) in new[] { (0, "なし"), (2, "1/2拍"), (3, "1/3拍"), (4, "1/4拍"), (8, "1/8拍") })
+        {
+            if (GUILayout.Toggle(guideSnap == division, label, EditorStyles.miniButton) && guideSnap != division)
+            {
+                guideSnap = division;
+            }
+        }
+
+        GUILayout.EndHorizontal();
+        GUILayout.Label("揃えるときは譜面の BPM とオフセットを使います。合わないときは「なし」にしてください。", note);
+        GUILayout.Space(6f);
+        bool canAnalyze = AudioImport.CanReadSamples(audioClip);
+        GUILayout.Label(canAnalyze ? "現在のガイド拍: " + Chart.guides.Length
+            : audioClip == null ? "音源がないので作れません。" : "解析には音源の Load Type を Decompress On Load にしてください。", note);
+        GUILayout.Space(8f);
+        GUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("閉じる", GUILayout.Width(80f)))
+        {
+            Defer(() => guideDialog.Open = false);
+        }
+
+        using (new EditorGUI.DisabledScope(!canAnalyze))
+        {
+            if (GUILayout.Button("生成", GUILayout.Width(80f)))
+            {
+                Defer(RunGuideGenerate);
+            }
+        }
+
+        GUILayout.EndHorizontal();
+    }
+
+    /// <summary>The song's onset analysis, made once per clip; null when it cannot be read.</summary>
+    private ChartAudioAnalysis AnalyzeAudio()
+    {
+        if (!AudioImport.CanReadSamples(audioClip))
+        {
+            return null;
+        }
+
+        if (generateAnalysisClip != audioClip)
+        {
+            generateAnalysis = ChartAudioAnalysis.FromClip(audioClip);
+            generateAnalysisClip = generateAnalysis != null ? audioClip : null;
+        }
+
+        return generateAnalysis;
+    }
+
+    private void RunGuideGenerate()
+    {
+        ChartAudioAnalysis analysis = AnalyzeAudio();
+        if (analysis == null)
+        {
+            Notify("音源を解析できませんでした");
+            return;
+        }
+
+        double[] guides = ChartGuideBeats.Generate(analysis, Chart.bpm, Chart.offset, Chart.audioOffset, guideSensitivity, guideSnap);
+        // Anything playing has the old beats: stop it.
+        playback.Stop();
+        flow.StopEmbeddedPreview();
+        previewWasRunning = false;
+        Modify("Generate guide beats", () => Chart.guides = guides);
+        guideEnabled = true;
+        SaveLayout();
+        Notify("ガイド拍を " + guides.Length + " 個作りました");
+    }
+
+    private void ClearGuides()
+    {
+        playback.Stop();
+        Modify("Clear guide beats", () => Chart.guides = new double[0]);
+    }
+
+    /// <summary>Guide beats on the timeline: a line across every lane.</summary>
+    private void DrawGuideBeats(double bottom, double top)
+    {
+        if (!guideEnabled)
+        {
+            return;
+        }
+
+        foreach (double time in Chart.guides)
+        {
+            if (time < bottom || time > top)
+            {
+                continue;
+            }
+
+            float y = TimeToY(time);
+            if (y < HeaderHeight)
+            {
+                continue;
+            }
+
+            foreach (Column column in columns)
+            {
+                if (column.Kind == ColumnKind.Lane)
+                {
+                    EditorGUI.DrawRect(new Rect(column.Rect.x + 1f, y - 1f, column.Rect.width - 2f, 2f), GuideColor);
+                }
+            }
+        }
+    }
+
     private void DrawInfoDialog()
     {
         DrawChartSection();
@@ -2321,10 +2488,12 @@ public sealed partial class ChartEditorScreen
         musicVolume = EditorGUILayout.Slider("音量", musicVolume, 0f, 1f);
         clapVolume = EditorGUILayout.Slider("ノーツ音量", clapVolume, 0f, 1f);
         metronomeVolume = EditorGUILayout.Slider("メトロノーム", metronomeVolume, 0f, 1f);
+        guideVolume = EditorGUILayout.Slider("ガイド音量", guideVolume, 0f, 1f);
         GUILayout.Space(6f);
         musicEnabled = EditorGUILayout.ToggleLeft("音楽を鳴らす", musicEnabled);
         clapEnabled = EditorGUILayout.ToggleLeft("ノーツ音を鳴らす", clapEnabled);
         metronomeEnabled = EditorGUILayout.ToggleLeft("メトロノームを鳴らす (T)", metronomeEnabled);
+        guideEnabled = EditorGUILayout.ToggleLeft("ガイド拍を出す (U)", guideEnabled);
         if (EditorGUI.EndChangeCheck())
         {
             SaveLayout();
@@ -2352,7 +2521,7 @@ public sealed partial class ChartEditorScreen
             "V 選択　B 範囲選択　N ノーツ　H ロング　F フリック　L レーザー　E 消しゴム\n" +
             string.Join("\n", Tools.Select(info => $"・{info.Name}: {info.Hint}")) + "\n\n" +
             "<b>再生</b>\n" +
-            "Space 音楽の再生/停止（再生位置から）　ルーラーのクリックで再生位置を移動　T メトロノーム\n" +
+            "Space 音楽の再生/停止（再生位置から）　ルーラーのクリックで再生位置を移動　T メトロノーム　U ガイド拍（音と線）\n" +
             "P プレビュー（ゲームプレビューが出ていればその中で、なければ全画面）　Shift+P 全画面でプレビュー（全画面は P でも閉じる）　R / ⏮ 最初からプレビュー\n\n" +
             "<b>移動・表示</b>\n" +
             "↑↓ 再生位置をグリッド1つ（Shift で1小節）　PageUp/Down 1小節　Home 先頭\n" +
@@ -2536,6 +2705,7 @@ public sealed partial class ChartEditorScreen
         {
             case KeyCode.Space: return TogglePlayback;
             case KeyCode.T: return ToggleMetronome;
+            case KeyCode.U: return ToggleGuide;
             case KeyCode.P: return shift ? (Action)PreviewInGame : TogglePreview;
             case KeyCode.R: return PreviewFromStart;
             case KeyCode.F: return ToggleFlickOnly; // Shift+F (plain F picks the flick tool)

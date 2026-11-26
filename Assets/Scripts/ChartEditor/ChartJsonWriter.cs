@@ -64,9 +64,27 @@ public static class ChartJsonWriter
             AppendLaser(json, lasers[index]);
         }
 
-        json.Append(lasers.Length > 0 ? "\n  ]\n" : "]\n");
-        json.Append("}\n");
+        json.Append(lasers.Length > 0 ? "\n  ]" : "]");
+        AppendGuides(json, chart.guides);
+        json.Append("\n}\n");
         return json.ToString();
+    }
+
+    /// <summary>The guide beats, eight times to a line; left out when there are none.</summary>
+    private static void AppendGuides(StringBuilder json, double[] guides)
+    {
+        if (guides == null || guides.Length == 0)
+        {
+            return;
+        }
+
+        json.Append(",\n  \"guides\": [");
+        for (int index = 0; index < guides.Length; index++)
+        {
+            json.Append(index == 0 ? "\n    " : index % 8 == 0 ? ",\n    " : ", ").Append(Time(guides[index]));
+        }
+
+        json.Append("\n  ]");
     }
 
     private static void AppendNote(StringBuilder json, TapNoteData note)

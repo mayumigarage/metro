@@ -79,6 +79,8 @@ public sealed class GameFlow : MonoBehaviour
     private ChartEditorScreen chartEditor;
     private bool previewFromEditor;
     private bool previewCloseKeyDown;
+    private bool previewCloseKeyArmed;
+    private float previewOpenedAt;
 
     // Chart editor game preview: the stage runs in a sidebar of the editor (SetGameViewport).
     private bool embeddedPreview;
@@ -111,6 +113,7 @@ public sealed class GameFlow : MonoBehaviour
         laneCombo = GetOrAdd<LaneComboView>();
         laneJudgement = GetOrAdd<LaneJudgementView>();
         GetOrAdd<NoteSoundPlayer>();
+        GetOrAdd<GuideBeatView>();
 
         // The clock waits for a song to be chosen instead of starting with the scene.
         songClock.DisableAutoStart();
@@ -181,7 +184,9 @@ public sealed class GameFlow : MonoBehaviour
     /// <summary>
     /// P closes the chart editor's full-screen preview. It acts on the release of a press
     /// made during the preview: the P that opened it does not close it, and the editor is
-    /// not back yet to take this press as "preview" again.
+    /// not back yet to take this press as "preview" again. The editor reads that opening P
+    /// from IMGUI, and the Input System may only report it a frame later, so presses count
+    /// once the key has been seen up a moment after the preview opened.
     /// </summary>
     private bool ClosePreviewByKey()
     {
@@ -189,6 +194,13 @@ public sealed class GameFlow : MonoBehaviour
         if (!previewFromEditor || IsBusy || keyboard == null)
         {
             previewCloseKeyDown = false;
+            return false;
+        }
+
+        if (!previewCloseKeyArmed)
+        {
+            previewCloseKeyArmed = Time.unscaledTime >= previewOpenedAt + 0.15f
+                && !keyboard.pKey.isPressed && !keyboard.pKey.wasReleasedThisFrame;
             return false;
         }
 
@@ -324,6 +336,8 @@ public sealed class GameFlow : MonoBehaviour
         SetGameViewport(FullViewport);
         chartEditor.enabled = false;
         previewFromEditor = true;
+        previewCloseKeyArmed = false;
+        previewOpenedAt = Time.unscaledTime;
         StartPreview(source, fromSongTime);
     }
 
@@ -951,6 +965,7 @@ public sealed class GameFlow : MonoBehaviour
             audio = source.audio,
             audioOffset = source.audioOffset,
             jacket = source.jacket,
+            guides = System.Array.FindAll(source.guides, time => time >= from),
             notes = notes.ToArray(),
             lasers = lasers.ToArray()
         };

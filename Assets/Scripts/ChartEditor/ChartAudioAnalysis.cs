@@ -295,6 +295,48 @@ public sealed class ChartAudioAnalysis
         return quietest == float.MaxValue ? 0f : Mathf.Clamp01(quietest / attack);
     }
 
+    // Where a peak of the flux lies relative to its frame's start: a hit shows up once it is well inside the window.
+    private const double PeakLatencyFrames = 3d;
+
+    /// <summary>
+    /// The moments a new sound starts, as if tapped along: the onset curve's peaks of at least
+    /// <paramref name="threshold"/>, the strongest first claiming <paramref name="minGap"/> seconds around
+    /// itself, in time order.
+    /// </summary>
+    public List<(double time, float strength)> Peaks(float threshold, double minGap)
+    {
+        List<int> candidates = new List<int>();
+        for (int frame = 1; frame + 1 < onset.Length; frame++)
+        {
+            if (onset[frame] >= threshold && onset[frame] > onset[frame - 1] && onset[frame] >= onset[frame + 1])
+            {
+                candidates.Add(frame);
+            }
+        }
+
+        candidates.Sort((left, right) => onset[right].CompareTo(onset[left]));
+        int gap = Math.Max(1, (int)Math.Round(minGap / FrameSeconds));
+        bool[] taken = new bool[onset.Length];
+        List<(double time, float strength)> peaks = new List<(double, float)>();
+        foreach (int frame in candidates)
+        {
+            if (taken[frame])
+            {
+                continue;
+            }
+
+            for (int near = Math.Max(0, frame - gap + 1); near < Math.Min(onset.Length, frame + gap); near++)
+            {
+                taken[near] = true;
+            }
+
+            peaks.Add(((frame + PeakLatencyFrames) * FrameSeconds, onset[frame]));
+        }
+
+        peaks.Sort((left, right) => left.time.CompareTo(right.time));
+        return peaks;
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static void NormalizeByPercentile(float[] curve, float percentile)

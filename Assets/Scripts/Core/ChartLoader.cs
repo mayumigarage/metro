@@ -138,6 +138,12 @@ public sealed class SongChartData
     public TapNoteData[] notes = Array.Empty<TapNoteData>();
     public LaserNoteData[] lasers = Array.Empty<LaserNoteData>();
 
+    /// <summary>
+    /// Guide beats: song times to tap along to, a charting aid made by the chart editor from the song
+    /// (<c>ChartGuideBeats</c>). Shown and sounded in editor previews only; never judged.
+    /// </summary>
+    public double[] guides = Array.Empty<double>();
+
     /// <summary>Name of the chart asset; identifies the song in the saved best scores.</summary>
     [NonSerialized] public string id;
 
@@ -430,6 +436,8 @@ public sealed class ChartLoader : MonoBehaviour
         }
 
         chart.lasers = GetPlayableLasers(chart.lasers, id);
+        chart.guides ??= Array.Empty<double>();
+        Array.Sort(chart.guides);
         Array.Sort(chart.notes, (left, right) => left.time.CompareTo(right.time));
         Array.Sort(chart.lasers, (left, right) => left.StartTime.CompareTo(right.StartTime));
         return chart;
@@ -478,6 +486,7 @@ public sealed class ChartLoader : MonoBehaviour
             audio = source.audio,
             audioOffset = source.audioOffset,
             jacket = source.jacket,
+            guides = source.guides,
             notes = new TapNoteData[source.notes.Length],
             lasers = new LaserNoteData[source.lasers.Length]
         };

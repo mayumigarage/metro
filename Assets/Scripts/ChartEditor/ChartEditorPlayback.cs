@@ -32,6 +32,12 @@ public sealed class ChartEditorPlayback : IDisposable
     private AudioClip tickClip;
     private AudioClip accentClip;
     private int nextTickVoice;
+    private const int GuideVoices = 4;
+    private readonly AudioSource[] guides = new AudioSource[GuideVoices];
+    private AudioClip guideClip;
+    private double[] guideTimes = Array.Empty<double>();
+    private int nextGuide;
+    private int nextGuideVoice;
     // Beat n of the metronome is at beatOrigin + n * beatSeconds; every fourth one starts a measure.
     private double beatOrigin;
     private double beatSeconds;
@@ -52,6 +58,11 @@ public sealed class ChartEditorPlayback : IDisposable
     public bool MetronomeEnabled { get; set; }
 
     public float MetronomeVolume { get; set; } = 0.6f;
+
+    /// <summary>Sounds the chart's guide beats.</summary>
+    public bool GuideEnabled { get; set; }
+
+    public float GuideVolume { get; set; } = 0.8f;
 
     /// <summary>Song time of the playback.</summary>
     public double SongTime => Time.realtimeSinceStartupAsDouble - wallSongStart;
@@ -106,6 +117,13 @@ public sealed class ChartEditorPlayback : IDisposable
         while (nextClap < clapTimes.Count && clapTimes[nextClap] < fromSongTime - 0.001d)
         {
             nextClap++;
+        }
+
+        guideTimes = chart != null && chart.guides != null ? (double[])chart.guides.Clone() : Array.Empty<double>();
+        nextGuide = 0;
+        while (nextGuide < guideTimes.Length && guideTimes[nextGuide] < fromSongTime - 0.001d)
+        {
+            nextGuide++;
         }
 
         beatSeconds = chart != null ? 60d / Math.Max(1f, chart.bpm) : 0.5d;
@@ -186,6 +204,21 @@ public sealed class ChartEditorPlayback : IDisposable
             voice.PlayScheduled(dspNow + Math.Max(0d, time - now));
         }
 
+        while (nextGuide < guideTimes.Length && guideTimes[nextGuide] <= now + ClapLookAheadSeconds)
+        {
+            double time = guideTimes[nextGuide];
+            nextGuide++;
+            if (!GuideEnabled || time < now - 0.02d)
+            {
+                continue;
+            }
+
+            AudioSource voice = guides[nextGuideVoice];
+            nextGuideVoice = (nextGuideVoice + 1) % guides.Length;
+            voice.volume = GuideVolume;
+            voice.PlayScheduled(dspNow + Math.Max(0d, time - now));
+        }
+
         while (beatOrigin + nextBeat * beatSeconds <= now + ClapLookAheadSeconds)
         {
             double time = beatOrigin + nextBeat * beatSeconds;
@@ -214,6 +247,14 @@ public sealed class ChartEditorPlayback : IDisposable
         }
 
         foreach (AudioSource voice in claps)
+        {
+            if (voice != null)
+            {
+                voice.Stop();
+            }
+        }
+
+        foreach (AudioSource voice in guides)
         {
             if (voice != null)
             {
@@ -253,7 +294,13 @@ public sealed class ChartEditorPlayback : IDisposable
             UnityEngine.Object.DestroyImmediate(accentClip);
         }
 
+        if (guideClip != null)
+        {
+            UnityEngine.Object.DestroyImmediate(guideClip);
+        }
+
         host = null;
+        guideClip = null;
         music = null;
         clapClip = null;
         tickClip = null;
@@ -286,6 +333,20 @@ public sealed class ChartEditorPlayback : IDisposable
             claps[index] = voice;
         }
 
+        if (guideClip == null)
+        {
+            guideClip = CreateKnockClip();
+        }
+
+        for (int index = 0; index < guides.Length; index++)
+        {
+            AudioSource voice = host.AddComponent<AudioSource>();
+            voice.playOnAwake = false;
+            voice.spatialBlend = 0f;
+            voice.clip = guideClip;
+            guides[index] = voice;
+        }
+
         if (tickClip == null)
         {
             tickClip = CreateTickClip("ChartEditorTick", 1000f);
@@ -299,6 +360,27 @@ public sealed class ChartEditorPlayback : IDisposable
             voice.spatialBlend = 0f;
             ticks[index] = voice;
         }
+    }
+
+    /// <summary>The guide beat: a low, dry knock like a tap on a desk, apart from the claps and the metronome.</summary>
+    private static AudioClip CreateKnockClip()
+    {
+        const int sampleRate = 44100;
+        const int length = sampleRate / 16;
+        float[] data = new float[length];
+        System.Random random = new System.Random(11);
+        for (int index = 0; index < length; index++)
+        {
+            float time = index / (float)sampleRate;
+            float body = Mathf.Exp(-time * 70f) * Mathf.Sin(2f * Mathf.PI * 320f * time);
+            float contact = Mathf.Exp(-time * 600f) * (float)(random.NextDouble() * 2d - 1d);
+            data[index] = Mathf.Clamp(body * 0.9f + contact * 0.5f, -1f, 1f);
+        }
+
+        AudioClip clip = AudioClip.Create("ChartEditorKnock", length, 1, sampleRate, false);
+        clip.SetData(data, 0);
+        clip.hideFlags = HideFlags.HideAndDontSave;
+        return clip;
     }
 
     /// <summary>The metronome's click: a short plain tone, unlike the noisy clap.</summary>

@@ -540,6 +540,22 @@ public sealed partial class ChartEditorScreen
 
         DrawGrid3D();
 
+        // Guide beats across the ceiling and the floor.
+        if (guideEnabled)
+        {
+            foreach (double time in Chart.guides)
+            {
+                if (time < view3DFrom || time > view3DTo)
+                {
+                    continue;
+                }
+
+                float z = Z(time);
+                Line(new Vector3(-Box3DHalfWidth, Box3DHalfHeight, z), new Vector3(Box3DHalfWidth, Box3DHalfHeight, z), GuideColor);
+                Line(new Vector3(-Box3DHalfWidth, -Box3DHalfHeight, z), new Vector3(Box3DHalfWidth, -Box3DHalfHeight, z), GuideColor);
+            }
+        }
+
         // The placement plane's frame and, with the laser tool, its 0.25 grid.
         Color frame = new Color(1f, 1f, 1f, laserTool ? 0.45f : 0.16f);
         Vector2[] corners = { new Vector2(-1f, -1f), new Vector2(1f, -1f), new Vector2(1f, 1f), new Vector2(-1f, 1f) };
