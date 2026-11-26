@@ -1,0 +1,59 @@
+{
+  "title": "Hold Line",
+  "artist": "metro demo",
+  "bpm": 100,
+  "level": 3,
+  "notes": [
+    {"lane": 2, "time": 2.4, "duration": 1.2},
+    {"lane": 3, "time": 3.6, "duration": 1.2},
+    {"lane": 0, "time": 4.8, "duration": 1.2},
+    {"lane": 1, "time": 6.0, "duration": 1.2},
+    {"lane": 2, "time": 7.2, "duration": 2.4},
+    {"lane": 1, "time": 7.8},
+    {"lane": 1, "time": 8.4},
+    {"lane": 1, "time": 9.0},
+    {"lane": 3, "time": 9.6, "duration": 2.4},
+    {"lane": 0, "time": 10.2},
+    {"lane": 0, "time": 10.8},
+    {"lane": 0, "time": 11.4},
+    {"lane": 3, "time": 12.0, "duration": 1.8},
+    {"lane": 3, "time": 14.1},
+    {"lane": 1, "time": 14.4, "duration": 1.8},
+    {"lane": 2, "time": 16.2},
+    {"lane": 3, "time": 16.5},
+    {"lane": 0, "time": 16.8, "duration": 1.2},
+    {"lane": 3, "time": 16.8, "duration": 1.2},
+    {"lane": 1, "time": 18.0, "duration": 1.2},
+    {"lane": 2, "time": 18.0, "duration": 1.2},
+    {"lane": 0, "time": 19.2, "direction": 1},
+    {"lane": 1, "time": 19.8, "direction": 1},
+    {"lane": 2, "time": 20.4, "direction": 2},
+    {"lane": 3, "time": 21.0, "direction": 2},
+    {"lane": 2, "time": 21.6, "duration": 2.4},
+    {"lane": 0, "time": 24.0, "duration": 2.4},
+    {"lane": 1, "time": 24.0, "duration": 2.4},
+    {"lane": 2, "time": 24.6},
+    {"lane": 3, "time": 25.2},
+    {"lane": 2, "time": 25.8},
+    {"lane": 2, "time": 26.4},
+    {"lane": 3, "time": 26.4}
+  ],
+  "lasers": [
+    {
+      "side": 0,
+      "points": [
+        {"time": 12.0, "x": -1.0, "y": 0.0},
+        {"time": 13.2, "x": 1.0, "y": 0.0},
+        {"time": 14.4, "x": 0.0, "y": 1.0}
+      ]
+    },
+    {
+      "side": 1,
+      "points": [
+        {"time": 21.6, "x": 1.0, "y": 0.0},
+        {"time": 22.8, "x": -1.0, "y": 0.0},
+        {"time": 24.0, "x": 0.0, "y": -1.0}
+      ]
+    }
+  ]
+}
