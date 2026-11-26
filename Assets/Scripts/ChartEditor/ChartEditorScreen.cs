@@ -1,10 +1,12 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using MetroEd;
 using UnityEngine;
+using UnityEngine.Networking;
 
 /// <summary>
 /// The chart editor screen of the game (title screen > CHART EDITOR): edits JSON charts on a vertical
@@ -1150,11 +1152,51 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         if (path != loadedAudioPath)
         {
             loadedAudioPath = path;
-            audioClip = string.IsNullOrWhiteSpace(path) ? null : Resources.Load<AudioClip>(path);
+            audioClip = null;
+            if (AudioImport.IsFileAudio(path))
+            {
+                // Imported in a build: read the file asynchronously; BuildWaveform runs when it arrives.
+                StartCoroutine(LoadFileAudio(path));
+            }
+            else
+            {
+                audioClip = string.IsNullOrWhiteSpace(path) ? null : Resources.Load<AudioClip>(path);
+            }
+
             BuildWaveform();
         }
 
         return audioClip;
+    }
+
+    private IEnumerator LoadFileAudio(string audio)
+    {
+        string absolute = AudioImport.ResolveFilePath(audio);
+        if (!File.Exists(absolute))
+        {
+            Notify("音源ファイルが見つかりません: " + audio);
+            yield break;
+        }
+
+        using UnityWebRequest request = UnityWebRequestMultimedia.GetAudioClip(new Uri(absolute).AbsoluteUri, AudioImport.AudioTypeOf(absolute));
+        ((DownloadHandlerAudioClip)request.downloadHandler).streamAudio = false;
+        yield return request.SendWebRequest();
+
+        if (loadedAudioPath != audio)
+        {
+            yield break; // the chart changed its audio while this was loading
+        }
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Notify("音源を読み込めませんでした: " + request.error);
+            yield break;
+        }
+
+        audioClip = DownloadHandlerAudioClip.GetContent(request);
+        AudioImport.MarkAsFileClip(audioClip);
+        BuildWaveform();
+        Repaint();
     }
 
     /// <summary>
@@ -1213,7 +1255,7 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
             return;
         }
 
-        if (audioClip.loadType != AudioClipLoadType.DecompressOnLoad)
+        if (!AudioImport.CanReadSamples(audioClip))
         {
             waveformNote = "波形を表示するには、音源の Load Type を Decompress On Load にしてください。";
             return;
@@ -3108,12 +3150,10 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
 
         EditorGUILayout.LabelField("Resources 内のパス（拡張子なし）例: Audio/elevate", EditorStyles.wordWrappedMiniLabel);
 
-#if UNITY_EDITOR
         if (GUILayout.Button("音源ファイルを取り込む…", EditorStyles.miniButton))
         {
             Defer(ImportAudio);
         }
-#endif
 
         if (clip != null)
         {

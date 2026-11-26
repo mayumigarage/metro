@@ -34,7 +34,7 @@ public sealed class ChartAudioAnalysis
     /// <summary>Reads the clip (it must be Decompress On Load) and analyses it; null when its samples cannot be read.</summary>
     public static ChartAudioAnalysis FromClip(AudioClip clip)
     {
-        if (clip == null || clip.loadType != AudioClipLoadType.DecompressOnLoad)
+        if (!AudioImport.CanReadSamples(clip))
         {
             return null;
         }

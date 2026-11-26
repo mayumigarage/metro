@@ -434,9 +434,7 @@ public sealed partial class ChartEditorScreen
                 double cursor = cursorTime;
                 Modify("Set offset", () => Chart.offset = Math.Round(cursor * 10000d) / 10000d);
             }),
-#if UNITY_EDITOR
             Item("音源ファイルを取り込む…", string.Empty, ImportAudio),
-#endif
             Item("波形から開始位置を自動調整", string.Empty, AutoAlignAudio, () => waveform != null)
         };
 
@@ -2145,7 +2143,7 @@ public sealed partial class ChartEditorScreen
         GUIStyle note = new GUIStyle(EditorStyles.wordWrappedMiniLabel);
         GUILayout.Label("BPM・オフセットの拍に合わせてノーツを並べます。結果は選択された状態で入るので、Ctrl+Z で丸ごと戻せます。", note);
         GUILayout.Space(6f);
-        bool canAnalyze = audioClip != null && audioClip.loadType == AudioClipLoadType.DecompressOnLoad;
+        bool canAnalyze = AudioImport.CanReadSamples(audioClip);
         using (new EditorGUI.DisabledScope(!canAnalyze))
         {
             generateFromAudio = EditorGUILayout.ToggleLeft("音源のリズムに合わせる（音の立ち上がりを解析）", generateFromAudio);
@@ -2219,7 +2217,7 @@ public sealed partial class ChartEditorScreen
         settings.songEnd = audioClip != null ? audioClip.length + Chart.audioOffset : 0d;
         settings.audioOffset = Chart.audioOffset;
         settings.audio = null;
-        if (generateFromAudio && audioClip != null && audioClip.loadType == AudioClipLoadType.DecompressOnLoad)
+        if (generateFromAudio && AudioImport.CanReadSamples(audioClip))
         {
             if (generateAnalysisClip != audioClip)
             {
@@ -2357,14 +2355,13 @@ public sealed partial class ChartEditorScreen
         }
     }
 
-#if UNITY_EDITOR
     private void ImportAudio()
     {
         string source = NativeDialogs.OpenFile("音源を取り込む", NativeDialogs.AudioFilter, Application.dataPath);
-        string resourcePath = string.IsNullOrEmpty(source) ? null : AudioImport.Import(source);
-        if (resourcePath != null)
+        string audioValue = string.IsNullOrEmpty(source) ? null : AudioImport.Import(source);
+        if (audioValue != null)
         {
-            Modify("Import audio", () => Chart.audio = resourcePath);
+            Modify("Import audio", () => Chart.audio = audioValue);
             loadedAudioPath = null; // reload the clip and its waveform from the new file
             Notify($"{System.IO.Path.GetFileName(source)} を取り込みました");
         }
@@ -2373,7 +2370,6 @@ public sealed partial class ChartEditorScreen
             Notify("音源を取り込めませんでした");
         }
     }
-#endif
 
     private void SelectAllNotes()
     {
