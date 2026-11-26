@@ -42,8 +42,8 @@ do {
     try { $build = Invoke-Editor 'build status' } catch { $build = $null }
 } until ($build.status -eq 'completed' -and $build.buildId -eq $queued.buildId)
 
-# The build rewrites preloadedAssets; the tree was clean, so put the file back.
-git checkout --quiet -- ProjectSettings/ProjectSettings.asset
+# The build rewrites preloadedAssets and empties the HUD's dynamic font atlas; the tree was clean, so put the files back.
+git checkout --quiet -- ProjectSettings/ProjectSettings.asset 'Assets/UI/MetroSign/Fonts'
 if ($build.result -ne 'Succeeded') { throw "Build $($build.result): $($build.totalErrors) errors" }
 
 $log = Join-Path $outDir 'smoke.log'
