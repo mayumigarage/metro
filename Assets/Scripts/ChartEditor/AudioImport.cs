@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -24,9 +23,11 @@ public static class AudioImport
 
     private const string ProjectFolder = "Assets/Resources/Audio";
 
-    // Clips loaded from files at run time (build). Their samples are fully in memory, so they can be read
-    // even though their loadType is not necessarily Decompress On Load. Only the latest one is kept.
-    private static readonly HashSet<AudioClip> fileClips = new HashSet<AudioClip>();
+    // The clip loaded from a file at run time (build) and the audio value it was loaded for. Its samples are
+    // fully in memory, so they can be read even though its loadType is not necessarily Decompress On Load.
+    // Only the latest one is kept.
+    private static string fileClipAudio;
+    private static AudioClip fileClip;
 
     /// <summary>Copies <paramref name="sourcePath"/> into the project (editor) or the persistent folder (build) and returns the value for the chart's <c>audio</c>, or null.</summary>
     public static string Import(string sourcePath)
@@ -63,20 +64,36 @@ public static class AudioImport
         return Path.Combine(Application.persistentDataPath, relative);
     }
 
-    /// <summary>Remembers a clip loaded from a file, replacing the previous one.</summary>
-    public static void MarkAsFileClip(AudioClip clip)
+    /// <summary>Remembers the clip loaded from the file of a <c>file:</c> audio value, replacing the previous one.</summary>
+    public static void SetFileClip(string audio, AudioClip clip)
     {
-        fileClips.Clear();
-        if (clip != null)
+        fileClipAudio = audio;
+        fileClip = clip;
+    }
+
+    /// <summary>
+    /// The clip of a chart's <c>audio</c> value: a Resources clip, or for a <c>file:</c> value the clip the
+    /// chart editor has loaded. Null when there is none.
+    /// </summary>
+    public static AudioClip GetClip(string audio)
+    {
+        if (string.IsNullOrWhiteSpace(audio))
         {
-            fileClips.Add(clip);
+            return null;
         }
+
+        if (IsFileAudio(audio))
+        {
+            return audio == fileClipAudio ? fileClip : null;
+        }
+
+        return Resources.Load<AudioClip>(audio);
     }
 
     /// <summary>True when the clip's samples can be read (waveform, auto-generation).</summary>
     public static bool CanReadSamples(AudioClip clip)
     {
-        return clip != null && (clip.loadType == AudioClipLoadType.DecompressOnLoad || fileClips.Contains(clip));
+        return clip != null && (clip.loadType == AudioClipLoadType.DecompressOnLoad || clip == fileClip);
     }
 
     /// <summary>The UnityWebRequest audio type for a file's extension.</summary>

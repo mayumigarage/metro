@@ -1194,7 +1194,7 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         }
 
         audioClip = DownloadHandlerAudioClip.GetContent(request);
-        AudioImport.MarkAsFileClip(audioClip);
+        AudioImport.SetFileClip(audio, audioClip);
         BuildWaveform();
         Repaint();
     }

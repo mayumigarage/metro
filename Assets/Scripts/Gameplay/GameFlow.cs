@@ -471,10 +471,10 @@ public sealed class GameFlow : MonoBehaviour
         score.Begin(chart);
         noteSpawner.Begin(chart);
 
-        AudioClip clip = string.IsNullOrWhiteSpace(chart.audio) ? null : Resources.Load<AudioClip>(chart.audio);
+        AudioClip clip = AudioImport.GetClip(chart.audio);
         if (clip == null && !string.IsNullOrWhiteSpace(chart.audio))
         {
-            Debug.LogWarning($"Chart '{chart.id}': audio clip 'Resources/{chart.audio}' not found; playing silently.", this);
+            Debug.LogWarning($"Chart '{chart.id}': audio '{chart.audio}' not found or not loaded; playing silently.", this);
         }
 
         songClock.StartSong(leadIn, clip, fromSongTime, chart.audioOffset + GameSettings.AudioOffsetSeconds);
