@@ -11,6 +11,7 @@ public static class GameSettings
     public const float MinHiSpeed = 0.5f;
     public const float MaxHiSpeed = 5f;
     public const int MaxJudgeOffsetMs = 200;
+    public const int MaxVisualOffsetMs = 200;
     public const int MinStickAngle = 15;
     public const int MaxStickAngle = 60;
 
@@ -19,6 +20,7 @@ public static class GameSettings
     private static bool loaded;
     private static float hiSpeed = 1f;
     private static int judgeOffsetMs;
+    private static int visualOffsetMs;
     private static bool mirror;
     private static bool autoPlay;
     private static bool showFastSlow = true;
@@ -33,6 +35,8 @@ public static class GameSettings
     private static int masterVolumePercent = 100;
     private static int musicVolumePercent = 100;
     private static int audioOffsetMs;
+    private static bool noteSound;
+    private static int noteSoundVolumePercent = 60;
 
     public const int MaxAudioOffsetMs = 300;
 
@@ -68,6 +72,18 @@ public static class GameSettings
     }
 
     public static double JudgeOffsetSeconds => JudgeOffsetMs / 1000d;
+
+    /// <summary>
+    /// Draws notes, lasers and the tunnel frames later (negative = earlier) than the song
+    /// clock, for the display latency of the player's screen. Judgement is not moved.
+    /// </summary>
+    public static int VisualOffsetMs
+    {
+        get { Load(); return visualOffsetMs; }
+        set { Load(); Apply(ref visualOffsetMs, Mathf.Clamp(value, -MaxVisualOffsetMs, MaxVisualOffsetMs)); }
+    }
+
+    public static double VisualOffsetSeconds => VisualOffsetMs / 1000d;
 
     /// <summary>
     /// false: notes and lasers move at a constant speed along the tunnel (they only look
@@ -172,6 +188,20 @@ public static class GameSettings
     {
         get { Load(); return musicVolumePercent; }
         set { Load(); Apply(ref musicVolumePercent, Mathf.Clamp(value, 0, 100)); }
+    }
+
+    /// <summary>A tick whenever a note is hit (<see cref="NoteSoundPlayer"/>). Off by default.</summary>
+    public static bool NoteSound
+    {
+        get { Load(); return noteSound; }
+        set { Load(); Apply(ref noteSound, value); }
+    }
+
+    /// <summary>0..100: how loud <see cref="NoteSound"/> is.</summary>
+    public static int NoteSoundVolumePercent
+    {
+        get { Load(); return noteSoundVolumePercent; }
+        set { Load(); Apply(ref noteSoundVolumePercent, Mathf.Clamp(value, 0, 100)); }
     }
 
     /// <summary>
@@ -293,6 +323,7 @@ public static class GameSettings
         loaded = true;
         hiSpeed = Mathf.Clamp(PlayerPrefs.GetFloat(Prefix + "hiSpeed", hiSpeed), MinHiSpeed, MaxHiSpeed);
         judgeOffsetMs = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "judgeOffsetMs", judgeOffsetMs), -MaxJudgeOffsetMs, MaxJudgeOffsetMs);
+        visualOffsetMs = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "visualOffsetMs", visualOffsetMs), -MaxVisualOffsetMs, MaxVisualOffsetMs);
         mirror = PlayerPrefs.GetInt(Prefix + "mirror", 0) != 0;
         darkMode = PlayerPrefs.GetInt(Prefix + "darkMode", 0) != 0;
         autoPlay = PlayerPrefs.GetInt(Prefix + "autoPlay", 0) != 0;
@@ -307,6 +338,8 @@ public static class GameSettings
         masterVolumePercent = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "masterVolume", masterVolumePercent), 0, 100);
         musicVolumePercent = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "musicVolume", musicVolumePercent), 0, 100);
         audioOffsetMs = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "audioOffsetMs", audioOffsetMs), -MaxAudioOffsetMs, MaxAudioOffsetMs);
+        noteSound = PlayerPrefs.GetInt(Prefix + "noteSound", 0) != 0;
+        noteSoundVolumePercent = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "noteSoundVolume", noteSoundVolumePercent), 0, 100);
         laserColorIndex[0] = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "leftLaserColor", 0), 0, LaserColors.Length - 1);
         laserColorIndex[1] = Mathf.Clamp(PlayerPrefs.GetInt(Prefix + "rightLaserColor", 0), 0, LaserColors.Length - 1);
     }
@@ -327,6 +360,7 @@ public static class GameSettings
     {
         PlayerPrefs.SetFloat(Prefix + "hiSpeed", hiSpeed);
         PlayerPrefs.SetInt(Prefix + "judgeOffsetMs", judgeOffsetMs);
+        PlayerPrefs.SetInt(Prefix + "visualOffsetMs", visualOffsetMs);
         PlayerPrefs.SetInt(Prefix + "mirror", mirror ? 1 : 0);
         PlayerPrefs.SetInt(Prefix + "darkMode", darkMode ? 1 : 0);
         PlayerPrefs.SetInt(Prefix + "autoPlay", autoPlay ? 1 : 0);
@@ -341,6 +375,8 @@ public static class GameSettings
         PlayerPrefs.SetInt(Prefix + "masterVolume", masterVolumePercent);
         PlayerPrefs.SetInt(Prefix + "musicVolume", musicVolumePercent);
         PlayerPrefs.SetInt(Prefix + "audioOffsetMs", audioOffsetMs);
+        PlayerPrefs.SetInt(Prefix + "noteSound", noteSound ? 1 : 0);
+        PlayerPrefs.SetInt(Prefix + "noteSoundVolume", noteSoundVolumePercent);
         PlayerPrefs.SetInt(Prefix + "leftLaserColor", laserColorIndex[0]);
         PlayerPrefs.SetInt(Prefix + "rightLaserColor", laserColorIndex[1]);
     }

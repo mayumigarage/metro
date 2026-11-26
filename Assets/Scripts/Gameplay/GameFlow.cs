@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 /// <summary>
@@ -77,6 +78,7 @@ public sealed class GameFlow : MonoBehaviour
     private double previewStartTime;
     private ChartEditorScreen chartEditor;
     private bool previewFromEditor;
+    private bool previewCloseKeyDown;
 
     // Chart editor game preview: the stage runs in a sidebar of the editor (SetGameViewport).
     private bool embeddedPreview;
@@ -108,6 +110,7 @@ public sealed class GameFlow : MonoBehaviour
         score = GetOrAdd<ScoreTracker>();
         laneCombo = GetOrAdd<LaneComboView>();
         laneJudgement = GetOrAdd<LaneJudgementView>();
+        GetOrAdd<NoteSoundPlayer>();
 
         // The clock waits for a song to be chosen instead of starting with the scene.
         songClock.DisableAutoStart();
@@ -143,6 +146,11 @@ public sealed class GameFlow : MonoBehaviour
     private void Update()
     {
         MenuInput.Poll();
+        if (ClosePreviewByKey())
+        {
+            return;
+        }
+
         // Tab / Y opens the settings on the screens that have no handling of their own
         // (the song select and the song sign call OpenOptions themselves).
         if (MenuInput.Option && !IsBusy && ((CurrentState == State.Title && !title.IsConfirmingQuit) || CurrentState == State.GenreSelect
@@ -168,6 +176,35 @@ public sealed class GameFlow : MonoBehaviour
 
                 break;
         }
+    }
+
+    /// <summary>
+    /// P closes the chart editor's full-screen preview. It acts on the release of a press
+    /// made during the preview: the P that opened it does not close it, and the editor is
+    /// not back yet to take this press as "preview" again.
+    /// </summary>
+    private bool ClosePreviewByKey()
+    {
+        Keyboard keyboard = Keyboard.current;
+        if (!previewFromEditor || IsBusy || keyboard == null)
+        {
+            previewCloseKeyDown = false;
+            return false;
+        }
+
+        if (keyboard.pKey.wasPressedThisFrame)
+        {
+            previewCloseKeyDown = true;
+        }
+
+        if (!previewCloseKeyDown || !keyboard.pKey.wasReleasedThisFrame)
+        {
+            return false;
+        }
+
+        previewCloseKeyDown = false;
+        ReturnToEditor();
+        return true;
     }
 
     // ---- Menus ----------------------------------------------------------------------
@@ -212,6 +249,10 @@ public sealed class GameFlow : MonoBehaviour
         StopEmbeddedPreview();
         SetGameViewport(FullViewport);
         chartEditor.enabled = false;
+        // Charts saved in the editor appear in the song select; library indices may have moved.
+        chartLoader.LoadLibrary();
+        chartLoader.Select(0, false);
+        browsedSong = -1;
         title.ShowModes(TitleMode.Editor);
         CurrentState = State.Title;
     }

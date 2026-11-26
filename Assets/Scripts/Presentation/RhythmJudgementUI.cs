@@ -102,7 +102,7 @@ public sealed class RhythmJudgementUI : MonoBehaviour
         // The chart being played (also a chart editor preview), so the sides warn about the mirrored lasers too.
         if (laserWarning != null && songClock != null && noteSpawner != null)
         {
-            laserWarning.Tick(noteSpawner.Chart, songClock.SongTime, Time.unscaledDeltaTime);
+            laserWarning.Tick(noteSpawner.Chart, songClock.SongTime - GameSettings.VisualOffsetSeconds, Time.unscaledDeltaTime);
         }
     }
 

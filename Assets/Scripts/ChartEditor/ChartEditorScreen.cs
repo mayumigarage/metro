@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using MetroEd;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.Networking;
 
 /// <summary>
@@ -104,6 +105,8 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
     private bool clapEnabled = true;
     private float musicVolume = 0.8f;
     private float clapVolume = 0.6f;
+    private bool metronomeEnabled;
+    private float metronomeVolume = 0.6f;
     private bool freeLaserValues;
     private float previewLookAhead = 1.2f;
     private bool returnOnStop = true;
@@ -158,6 +161,9 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
     [NonSerialized] private int dragAxis; // 0 = x, 1 = y (laser columns)
     [NonSerialized] private Vector2 boxStart;
     [NonSerialized] private Rect boxRect;
+    // A box selection on the timeline is anchored to a time, so it keeps its start while the view scrolls.
+    [NonSerialized] private double boxStartTime;
+    [NonSerialized] private Vector2 boxMouse;
     [NonSerialized] private string hoverHint = string.Empty;
 
     // Direction drag (drag out of a note to give it a direction; right button = flick-only).
@@ -215,18 +221,8 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
     private bool showChartList;
     private Vector2 chartListScroll;
 
-    /// <summary>Where the editor looks for charts: the project's chart folder in the Editor, otherwise a folder next to the saved data.</summary>
-    private static string ChartsDirectory
-    {
-        get
-        {
-#if UNITY_EDITOR
-            return Path.Combine(Application.dataPath, "Resources", "Charts");
-#else
-            return Path.Combine(Application.persistentDataPath, "Charts");
-#endif
-        }
-    }
+    /// <summary>Where the editor saves charts and the game finds them (see <see cref="ChartLoader.UserChartsDirectory"/>).</summary>
+    private static string ChartsDirectory => ChartLoader.UserChartsDirectory;
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -314,8 +310,13 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
                 previewWasRunning = true;
                 cursorTime = Math.Max(playStartTime, flow.PreviewSongTime);
                 FollowCursor();
+                ApplySoundSettings();
+                playback.Follow(flow.PreviewSongTime, Chart);
                 return;
             }
+
+            playback?.StopFollowing();
+            AutoScrollBoxSelect();
 
             if (previewWasRunning)
             {
@@ -334,19 +335,30 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
             return;
         }
 
-        playback.MusicEnabled = musicEnabled;
-        playback.ClapEnabled = clapEnabled;
-        playback.ClapVolume = clapVolume;
+        ApplySoundSettings();
         playback.Update();
         cursorTime = playback.SongTime;
-        // Keep the playhead in the lower part of the view.
-        FollowCursor();
+        // Keep the playhead in the lower part of the view (a box selection holds the view still).
+        if (drag != DragMode.BoxSelect)
+        {
+            FollowCursor();
+        }
 
         double end = Math.Max(Chart.EndTime, audioClip != null ? audioClip.length : 0d) + 2d;
         if (cursorTime > end)
         {
             StopPlayback();
         }
+    }
+
+    private void ApplySoundSettings()
+    {
+        playback.MusicEnabled = musicEnabled;
+        playback.MusicVolume = musicVolume;
+        playback.ClapEnabled = clapEnabled;
+        playback.ClapVolume = clapVolume;
+        playback.MetronomeEnabled = metronomeEnabled;
+        playback.MetronomeVolume = metronomeVolume;
     }
 
     // ------------------------------------------------------------------ files
@@ -381,26 +393,71 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         UpdateDirty();
     }
 
+    /// <summary>
+    /// Saves into the chart folder, without asking where: the game never finds a chart anywhere
+    /// else. A new chart, or one opened from outside the folder, gets a file name (from the opened
+    /// file or its title) that does not overwrite another chart.
+    /// </summary>
     private void Save()
     {
-        if (string.IsNullOrEmpty(chartPath))
-        {
-            string path = NativeDialogs.SaveFile("譜面を保存", NativeDialogs.JsonFilter, ChartsDirectory, "json");
-            if (string.IsNullOrEmpty(path))
-            {
-                return;
-            }
-
-            chartPath = path;
-        }
-
         Normalize();
         string json = ChartJsonWriter.Write(Chart);
-        File.WriteAllText(chartPath, json, new UTF8Encoding(false));
+        try
+        {
+            Directory.CreateDirectory(ChartsDirectory);
+            string path = IsInChartsDirectory(chartPath) ? chartPath : NewChartPath();
+            File.WriteAllText(path, json, new UTF8Encoding(false));
+            chartPath = path;
+        }
+        catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+        {
+            Debug.LogError($"Chart could not be saved: {exception.Message}");
+            Notify("保存できませんでした");
+            return;
+        }
+
+#if UNITY_EDITOR
+        // The game reads this folder through Resources, which only sees imported assets.
+        UnityEditor.AssetDatabase.ImportAsset("Assets/Resources/Charts/" + Path.GetFileName(chartPath), UnityEditor.ImportAssetOptions.ForceSynchronousImport);
+#endif
         savedJson = json;
         RefreshChartList();
         UpdateDirty();
-        Notify($"{ChartName} を保存しました");
+        Notify($"{ChartName} を譜面フォルダーに保存しました");
+    }
+
+    private static bool IsInChartsDirectory(string path)
+    {
+        return !string.IsNullOrEmpty(path)
+            && string.Equals(Path.GetFullPath(Path.GetDirectoryName(path)), Path.GetFullPath(ChartsDirectory), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>A free file in the chart folder, named after the opened file or the chart's title.</summary>
+    private string NewChartPath()
+    {
+        string name = string.IsNullOrEmpty(chartPath) ? SafeFileName(Chart.title) : Path.GetFileNameWithoutExtension(chartPath);
+
+        // The file name identifies the song (best scores), so the bundled charts' names are taken too.
+        HashSet<string> taken = new HashSet<string>(
+            Resources.LoadAll<TextAsset>(ChartLoader.ResourcesFolder).Select(asset => asset.name), StringComparer.OrdinalIgnoreCase);
+        string candidate = name;
+        for (int number = 2; taken.Contains(candidate) || File.Exists(Path.Combine(ChartsDirectory, candidate + ".json")); number++)
+        {
+            candidate = name + "_" + number;
+        }
+
+        return Path.Combine(ChartsDirectory, candidate + ".json");
+    }
+
+    private static string SafeFileName(string title)
+    {
+        string name = string.IsNullOrWhiteSpace(title) ? "new_chart" : title.Trim();
+        foreach (char invalid in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(invalid, '_');
+        }
+
+        return name;
     }
 
     /// <summary>Renames the chart's file (and its .meta) in place; the open document and its edits stay as they are.</summary>
@@ -447,12 +504,7 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
     private void ExportChart()
     {
         Normalize();
-        string suggested = string.IsNullOrWhiteSpace(Chart.title) ? "new_chart" : Chart.title.Trim();
-        foreach (char invalid in Path.GetInvalidFileNameChars())
-        {
-            suggested = suggested.Replace(invalid, '_');
-        }
-
+        string suggested = SafeFileName(Chart.title);
         string start = string.IsNullOrEmpty(chartPath) ? ChartsDirectory : Path.GetDirectoryName(chartPath);
         string path = NativeDialogs.SaveFile("譜面を書き出し", NativeDialogs.JsonFilter, Path.Combine(start, suggested + ".json"), "json");
         if (string.IsNullOrEmpty(path))
@@ -1319,10 +1371,7 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
             }
 
             playStartTime = cursorTime;
-            playback.MusicEnabled = musicEnabled;
-            playback.MusicVolume = musicVolume;
-            playback.ClapVolume = clapVolume;
-            playback.ClapEnabled = clapEnabled;
+            ApplySoundSettings();
             playback.Play(GetAudioClip(), cursorTime, Chart);
         }
 
@@ -1396,6 +1445,24 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         Normalize();
         playStartTime = cursorTime;
         flow.StartEmbeddedPreview(ChartLoader.Parse(ChartJsonWriter.Write(Chart), ChartName), cursorTime);
+    }
+
+    /// <summary>The preview from the top of the chart, restarting one that is already running.</summary>
+    private void PreviewFromStart()
+    {
+        flow.StopEmbeddedPreview();
+        previewWasRunning = false;
+        playback.Stop();
+        cursorTime = 0d;
+        RevealCursor();
+        if (show3D)
+        {
+            StartSplitPreview();
+        }
+        else
+        {
+            PreviewInGame();
+        }
     }
 
     /// <summary>Plays the chart from the cursor in the real game; the pause menu or result leads back here.</summary>
@@ -1609,9 +1676,16 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
                 break;
 
             case EventType.ScrollWheel:
-                if (!inside)
+                // A box selection can be wheeled along from anywhere, even above or below the timeline.
+                bool boxing = drag == DragMode.BoxSelect && GUIUtility.hotControl == controlId;
+                if (!inside && !boxing)
                 {
                     break;
+                }
+
+                if (boxing)
+                {
+                    boxMouse = mouse;
                 }
 
                 if (current.control || current.command)
@@ -1624,6 +1698,11 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
                 }
 
                 viewTime = Math.Max(-2d, viewTime);
+                if (boxing)
+                {
+                    UpdateBoxRect();
+                }
+
                 current.Use();
                 Repaint();
                 break;
@@ -1638,6 +1717,11 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
                 if (OnMouseDown(current, column, mouse))
                 {
                     GUIUtility.hotControl = controlId;
+                    if (drag == DragMode.BoxSelect)
+                    {
+                        boxStartTime = YToTime(boxStart.y);
+                        boxMouse = mouse;
+                    }
                 }
 
                 current.Use();
@@ -1664,6 +1748,8 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
                 GUIUtility.hotControl = 0;
                 if (drag == DragMode.BoxSelect)
                 {
+                    boxMouse = mouse;
+                    UpdateBoxRect();
                     FinishBoxSelect();
                 }
                 else if (drag == DragMode.SetDirection)
@@ -2371,11 +2457,8 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
                 }
 
             case DragMode.BoxSelect:
-                boxRect = Rect.MinMaxRect(
-                    Mathf.Min(boxStart.x, mouse.x),
-                    Mathf.Min(boxStart.y, mouse.y),
-                    Mathf.Max(boxStart.x, mouse.x),
-                    Mathf.Max(boxStart.y, mouse.y));
+                boxMouse = mouse;
+                UpdateBoxRect();
                 break;
 
             case DragMode.ResizeHold:
@@ -2408,6 +2491,44 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
                 EraseAt(mouse);
                 break;
         }
+    }
+
+    /// <summary>The box from its anchored start to the pointer, in the view as it is scrolled now.</summary>
+    private void UpdateBoxRect()
+    {
+        float startY = TimeToY(boxStartTime);
+        boxRect = Rect.MinMaxRect(
+            Mathf.Min(boxStart.x, boxMouse.x),
+            Mathf.Min(startY, boxMouse.y),
+            Mathf.Max(boxStart.x, boxMouse.x),
+            Mathf.Max(startY, boxMouse.y));
+    }
+
+    /// <summary>
+    /// Like selecting text on a web page: a box dragged to (or past) the top or bottom of the
+    /// timeline scrolls it, faster the further the pointer is.
+    /// </summary>
+    private void AutoScrollBoxSelect()
+    {
+        if (drag != DragMode.BoxSelect || editView3D || Mouse.current == null || !Mouse.current.leftButton.isPressed)
+        {
+            return;
+        }
+
+        const float edge = 36f;
+        float above = HeaderHeight + edge - boxMouse.y;
+        float below = boxMouse.y - (timelineHeight - edge);
+        // Only toward where the box is being pulled, so a box started near an edge does not run off.
+        float startY = TimeToY(boxStartTime);
+        float pixels = above > 0f && boxMouse.y < startY - 4f ? above : below > 0f && boxMouse.y > startY + 4f ? -below : 0f;
+        if (pixels == 0f)
+        {
+            return;
+        }
+
+        float speed = Mathf.Sign(pixels) * Mathf.Min(Mathf.Abs(pixels) * 12f, 1600f); // pixels per second
+        viewTime = Math.Max(-2d, viewTime + speed * Time.unscaledDeltaTime / pixelsPerSecond);
+        UpdateBoxRect();
     }
 
     private void DragNotes(double time, Vector2 mouse)
@@ -2694,6 +2815,8 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
 
         if (drag == DragMode.BoxSelect)
         {
+            // The view may have scrolled since the last mouse event.
+            UpdateBoxRect();
             EditorGUI.DrawRect(boxRect, new Color(SelectColor.r, SelectColor.g, SelectColor.b, 0.12f));
             DrawOutline(boxRect, SelectColor, 1f);
         }
@@ -3182,7 +3305,7 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
         }
 
         musicVolume = EditorGUILayout.Slider("音量", musicVolume, 0f, 1f);
-        clapVolume = EditorGUILayout.Slider("クラップ音量", clapVolume, 0f, 1f);
+        clapVolume = EditorGUILayout.Slider("ノーツ音量", clapVolume, 0f, 1f);
     }
 
 

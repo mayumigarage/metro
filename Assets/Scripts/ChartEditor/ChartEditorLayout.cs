@@ -206,6 +206,11 @@ public sealed partial class ChartEditorScreen
         width2D = PlayerPrefs.GetFloat("ChartEditor.Width2D", 260f);
         tool = (Tool)Mathf.Clamp(PlayerPrefs.GetInt("ChartEditor.Tool", (int)Tool.Tap), 0, Tools.Length - 1);
         editView3D = PlayerPrefs.GetInt("ChartEditor.EditView3D", 0) == 1;
+        workPlane = (WorkPlane)Mathf.Clamp(PlayerPrefs.GetInt("ChartEditor.WorkPlane3D", 0), 0, 3);
+        clapEnabled = PlayerPrefs.GetInt("ChartEditor.NoteSound", 1) == 1;
+        clapVolume = PlayerPrefs.GetFloat("ChartEditor.NoteSoundVolume", 0.6f);
+        metronomeEnabled = PlayerPrefs.GetInt("ChartEditor.Metronome", 0) == 1;
+        metronomeVolume = PlayerPrefs.GetFloat("ChartEditor.MetronomeVolume", 0.6f);
     }
 
     private void SaveLayout()
@@ -217,6 +222,23 @@ public sealed partial class ChartEditorScreen
         PlayerPrefs.SetFloat("ChartEditor.Width2D", width2D);
         PlayerPrefs.SetInt("ChartEditor.Tool", (int)tool);
         PlayerPrefs.SetInt("ChartEditor.EditView3D", editView3D ? 1 : 0);
+        PlayerPrefs.SetInt("ChartEditor.WorkPlane3D", (int)workPlane);
+        PlayerPrefs.SetInt("ChartEditor.NoteSound", clapEnabled ? 1 : 0);
+        PlayerPrefs.SetFloat("ChartEditor.NoteSoundVolume", clapVolume);
+        PlayerPrefs.SetInt("ChartEditor.Metronome", metronomeEnabled ? 1 : 0);
+        PlayerPrefs.SetFloat("ChartEditor.MetronomeVolume", metronomeVolume);
+    }
+
+    private void ToggleNoteSound()
+    {
+        clapEnabled = !clapEnabled;
+        SaveLayout();
+    }
+
+    private void ToggleMetronome()
+    {
+        metronomeEnabled = !metronomeEnabled;
+        SaveLayout();
     }
 
     private void SetTool(Tool value)
@@ -412,7 +434,7 @@ public sealed partial class ChartEditorScreen
             return;
         }
 
-        infoDialog = new Dialog { Title = "譜面情報", Rect = new Rect(120f, 100f, 360f, 560f), Body = DrawInfoDialog };
+        infoDialog = new Dialog { Title = "譜面情報", Rect = new Rect(120f, 60f, 460f, 760f), Body = DrawInfoDialog };
         playDialog = new Dialog { Title = "再生設定", Rect = new Rect(160f, 120f, 320f, 250f), Body = DrawPlayDialog };
         helpDialog = new Dialog { Title = "操作一覧", Rect = new Rect(200f, 110f, 560f, 470f), Body = DrawHelpDialog };
         renameDialog = new Dialog { Title = "譜面名・アーティスト", Rect = new Rect(220f, 140f, 380f, 200f), Body = DrawRenameDialog };
@@ -534,11 +556,13 @@ public sealed partial class ChartEditorScreen
                 {
                     Item("音楽を再生 / 停止", "Space", TogglePlayback),
                     Item("プレビュー（再生位置から）", "P", TogglePreview),
+                    Item("最初からプレビュー", "R", PreviewFromStart),
                     Item("全画面でプレビュー", "Shift+P", PreviewInGame),
                     Item("先頭から再生", string.Empty, () => PlayFrom(0d)),
                     Separator,
                     Item("音楽を鳴らす", string.Empty, () => musicEnabled = !musicEnabled, null, () => musicEnabled),
-                    Item("クラップを鳴らす", string.Empty, () => clapEnabled = !clapEnabled, null, () => clapEnabled),
+                    Item("ノーツ音を鳴らす", string.Empty, ToggleNoteSound, null, () => clapEnabled),
+                    Item("メトロノーム", "T", ToggleMetronome, null, () => metronomeEnabled),
                     Item("停止で開始位置に戻る", string.Empty, () => returnOnStop = !returnOnStop, null, () => returnOnStop),
                     Item("全画面プレビューをオートプレイ", string.Empty, () => GameSettings.AutoPlay = !GameSettings.AutoPlay, () => !flow.IsEmbeddedPreview, () => GameSettings.AutoPlay),
                     Separator,
@@ -805,6 +829,21 @@ public sealed partial class ChartEditorScreen
         if (GUILayout.Button(new GUIContent(previewing ? "■ プレビュー" : "▶ プレビュー", previewTip), EditorStyles.miniButton, GUILayout.Width(92f)))
         {
             Defer(TogglePreview);
+        }
+
+        if (GUILayout.Button(new GUIContent("⏮ 最初から", "譜面の最初からプレビュー (R)"), EditorStyles.miniButton, GUILayout.Width(78f)))
+        {
+            Defer(PreviewFromStart);
+        }
+
+        if (GUILayout.Toggle(metronomeEnabled, new GUIContent("メトロノーム", "再生中に BPM の拍でクリックを鳴らす (T)"), EditorStyles.miniButton, GUILayout.Width(82f)) != metronomeEnabled)
+        {
+            Defer(ToggleMetronome);
+        }
+
+        if (GUILayout.Toggle(clapEnabled, new GUIContent("ノーツ音", "再生中にノーツの位置で音を鳴らす"), EditorStyles.miniButton, GUILayout.Width(60f)) != clapEnabled)
+        {
+            Defer(ToggleNoteSound);
         }
 
         GUIStyle timeStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter };
@@ -1703,9 +1742,15 @@ public sealed partial class ChartEditorScreen
     private void PlaceLaserPointAtCursor(int side, LaserNoteData selected, Vector2 value)
     {
         value = StickInput.ClampToSquare(value);
-        float x = SnapLaserValue(value.x);
-        float y = SnapLaserValue(value.y);
-        double time = Snap(cursorTime);
+        PlaceLaserPoint(side, selected, new Vector2(SnapLaserValue(value.x), SnapLaserValue(value.y)), Snap(cursorTime));
+    }
+
+    /// <summary>A point at any time (see PlaceLaserPointAtCursor); value and time are already snapped.</summary>
+    private void PlaceLaserPoint(int side, LaserNoteData selected, Vector2 value, double time)
+    {
+        value = StickInput.ClampToSquare(value);
+        float x = value.x;
+        float y = value.y;
         BeginDrag(DragMode.PadPoint, "Add laser point");
 
         if (selected != null && !Event.current.shift)
@@ -2064,10 +2109,10 @@ public sealed partial class ChartEditorScreen
     private void DrawRenameDialog()
     {
         GUILayout.Label("譜面名（ファイル名・日本語可）", EditorStyles.miniLabel);
-        renameText = GUILayout.TextField(renameText);
+        renameText = ChartLoader.RemoveTagBrackets(GUILayout.TextField(renameText));
         GUILayout.Space(4f);
         GUILayout.Label("アーティスト名（日本語可）", EditorStyles.miniLabel);
-        renameArtist = GUILayout.TextField(renameArtist ?? string.Empty);
+        renameArtist = ChartLoader.RemoveTagBrackets(GUILayout.TextField(renameArtist ?? string.Empty));
         GUILayout.Space(6f);
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
@@ -2272,11 +2317,19 @@ public sealed partial class ChartEditorScreen
 
     private void DrawPlayDialog()
     {
+        EditorGUI.BeginChangeCheck();
         musicVolume = EditorGUILayout.Slider("音量", musicVolume, 0f, 1f);
-        clapVolume = EditorGUILayout.Slider("クラップ音量", clapVolume, 0f, 1f);
+        clapVolume = EditorGUILayout.Slider("ノーツ音量", clapVolume, 0f, 1f);
+        metronomeVolume = EditorGUILayout.Slider("メトロノーム", metronomeVolume, 0f, 1f);
         GUILayout.Space(6f);
         musicEnabled = EditorGUILayout.ToggleLeft("音楽を鳴らす", musicEnabled);
-        clapEnabled = EditorGUILayout.ToggleLeft("ノーツでクラップを鳴らす", clapEnabled);
+        clapEnabled = EditorGUILayout.ToggleLeft("ノーツ音を鳴らす", clapEnabled);
+        metronomeEnabled = EditorGUILayout.ToggleLeft("メトロノームを鳴らす (T)", metronomeEnabled);
+        if (EditorGUI.EndChangeCheck())
+        {
+            SaveLayout();
+        }
+
         returnOnStop = EditorGUILayout.ToggleLeft("停止で開始位置に戻る", returnOnStop);
         using (new EditorGUI.DisabledScope(flow.IsEmbeddedPreview))
         {
@@ -2299,8 +2352,8 @@ public sealed partial class ChartEditorScreen
             "V 選択　B 範囲選択　N ノーツ　H ロング　F フリック　L レーザー　E 消しゴム\n" +
             string.Join("\n", Tools.Select(info => $"・{info.Name}: {info.Hint}")) + "\n\n" +
             "<b>再生</b>\n" +
-            "Space 音楽の再生/停止（再生位置から）　ルーラーのクリックで再生位置を移動\n" +
-            "P プレビュー（ゲームプレビューが出ていればその中で、なければ全画面）　Shift+P 全画面でプレビュー\n\n" +
+            "Space 音楽の再生/停止（再生位置から）　ルーラーのクリックで再生位置を移動　T メトロノーム\n" +
+            "P プレビュー（ゲームプレビューが出ていればその中で、なければ全画面）　Shift+P 全画面でプレビュー（全画面は P でも閉じる）　R / ⏮ 最初からプレビュー\n\n" +
             "<b>移動・表示</b>\n" +
             "↑↓ 再生位置をグリッド1つ（Shift で1小節）　PageUp/Down 1小節　Home 先頭\n" +
             "ホイール スクロール　Ctrl+ホイール ズーム　中ボタンドラッグ スクロール\n" +
@@ -2317,8 +2370,9 @@ public sealed partial class ChartEditorScreen
             "まっすぐ続く箱の天井が L / R、床が ZL / ZR、間がレーザーの空間。赤い枠が再生位置（配置面）\n" +
             "中ドラッグ 視点を回す　Shift+中ドラッグ 平行移動　Ctrl+中ドラッグ / Shift+ホイール ズーム\n" +
             "ホイール 再生位置をグリッド1つ　Ctrl+ホイール 奥行きの間隔　左上のボタン: 正面 / 上 / 横 / 斜め・透視 / 平行\n" +
-            "レーンをクリック: ノーツ（ツールは2Dと同じ）　レーザーツールで配置面をクリック: 再生位置に点\n" +
-            "レーザー点をドラッグ: X・Y（Ctrl で時刻）\n\n" +
+            "レーンをクリック: ノーツ（ツールは2Dと同じ）　レーザーツールでクリック: 作業面に点\n" +
+            "作業面: XY（再生位置の断面）/ XZ・YZ（奥行き方向の面）。自動は視点で決まる\n" +
+            "点をドラッグ: 作業面で移動（Ctrl で奥行き）　矢印: 1軸だけ移動　四角: 面で移動（吸着は同じ、Alt で解除）\n\n" +
             "<b>レーザー2Dビュー</b>（レーザー列の下）\n" +
             "点をドラッグ: 位置を変える　右クリック: 点を削除　レーザーツールでクリック: 再生位置に点（Shift で新しいレーザー）",
             text);
@@ -2481,7 +2535,9 @@ public sealed partial class ChartEditorScreen
         switch (current.keyCode)
         {
             case KeyCode.Space: return TogglePlayback;
+            case KeyCode.T: return ToggleMetronome;
             case KeyCode.P: return shift ? (Action)PreviewInGame : TogglePreview;
+            case KeyCode.R: return PreviewFromStart;
             case KeyCode.F: return ToggleFlickOnly; // Shift+F (plain F picks the flick tool)
             case KeyCode.F1: return () => helpDialog.Open = !helpDialog.Open;
             case KeyCode.F2: return OpenRename;

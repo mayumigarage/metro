@@ -58,7 +58,7 @@ public sealed class TunnelGridView : MonoBehaviour
             float bpm = chart != null && chart.bpm > 0f ? chart.bpm : 120f;
             double offset = chart != null ? chart.offset : 0d;
             double interval = beats * 60d / bpm;
-            double songTime = songClock.SongTime;
+            double songTime = songClock.SongTime - GameSettings.VisualOffsetSeconds;
             float travelTime = noteSpawner.TravelTimeSeconds;
 
             // Every frame time offset + k * interval between now (judgement line) and now + travel time (far end).

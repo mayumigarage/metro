@@ -66,7 +66,6 @@ public sealed partial class ChartEditorScreen
     [NonSerialized] private float navStartPitch;
     [NonSerialized] private float navStartDistance;
     [NonSerialized] private Vector3 navStartPan;
-    [NonSerialized] private bool pointDragTime;
 
     /// <summary>World units per second along the box; follows the timeline zoom (Ctrl + wheel).</summary>
     private float DepthPerSecond => pixelsPerSecond / 60f;
@@ -199,10 +198,12 @@ public sealed partial class ChartEditorScreen
     private void Draw3DEditView(Event current, Vector2 size)
     {
         SetupCamera3D(size);
+        hoverMouse3D = current.mousePosition;
         if (current.type == EventType.Repaint)
         {
             Render3D(size);
             DrawLabels3D();
+            DrawGizmoLabels3D();
             DrawOverlay3D();
         }
 
@@ -254,12 +255,29 @@ public sealed partial class ChartEditorScreen
         x += 6f;
         camOrtho = GUI.Toggle(Next(64f), camOrtho, new GUIContent("平行投影", "遠近感なしで表示（図面のように）"), EditorStyles.miniButton);
 
+        x += 6f;
+        GUI.Label(Next(40f), "作業面", EditorStyles.miniLabel);
+        string auto = "自動 " + ResolvedWorkPlane();
+        WorkPlaneButton(Next(60f), WorkPlane.Auto, auto, "レーザー点のドラッグと配置をする面を、視点に合わせて選ぶ");
+        WorkPlaneButton(Next(28f), WorkPlane.XY, "XY", "再生位置の断面（左右と上下）");
+        WorkPlaneButton(Next(28f), WorkPlane.XZ, "XZ", "水平の面（左右と奥行き）。高さは選択中の点");
+        WorkPlaneButton(Next(28f), WorkPlane.YZ, "YZ", "垂直の面（上下と奥行き）。左右位置は選択中の点");
+
         if (current.type == EventType.Repaint && x < size.x - 120f)
         {
             GUIStyle hint = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight, clipping = TextClipping.Clip };
             hint.normal.textColor = new Color(1f, 1f, 1f, 0.45f);
             GUI.Label(new Rect(x + 8f, 3f, size.x - x - 16f, Toolbar3DHeight - 6f),
                 "中ドラッグ 回転 ／ Shift+中 移動 ／ Shift+ホイール ズーム ／ ホイール 再生位置 ／ Ctrl+ホイール 奥行き", hint);
+        }
+    }
+
+    private void WorkPlaneButton(Rect rect, WorkPlane plane, string label, string tip)
+    {
+        if (GUI.Toggle(rect, workPlane == plane, new GUIContent(label, tip), EditorStyles.miniButton) && workPlane != plane)
+        {
+            workPlane = plane;
+            SaveLayout();
         }
     }
 
@@ -294,7 +312,17 @@ public sealed partial class ChartEditorScreen
             blend3D = CreateGLMaterial(false);
         }
 
-        if (solid3D == null || blend3D == null)
+        if (overlay3D == null)
+        {
+            // Drawn over everything: the gizmo is never hidden behind a lane.
+            overlay3D = CreateGLMaterial(false);
+            if (overlay3D != null)
+            {
+                overlay3D.SetInt("_ZTest", (int)UnityEngine.Rendering.CompareFunction.Always);
+            }
+        }
+
+        if (solid3D == null || blend3D == null || overlay3D == null)
         {
             return false;
         }
@@ -338,6 +366,11 @@ public sealed partial class ChartEditorScreen
         {
             Destroy(blend3D);
         }
+
+        if (overlay3D != null)
+        {
+            Destroy(overlay3D);
+        }
     }
 
     private void Render3D(Vector2 size)
@@ -358,6 +391,7 @@ public sealed partial class ChartEditorScreen
         DrawNotes3D();
         DrawLasers3D();
         DrawPlayhead3D();
+        DrawGizmo3D();
 
         GL.PopMatrix();
         RenderTexture.active = previous;
@@ -1134,7 +1168,10 @@ public sealed partial class ChartEditorScreen
             case EventType.MouseMove:
                 if (inside && drag == DragMode.None)
                 {
-                    hoverHint = LaneHint() + " ／ 中ドラッグ: 視点を回す ・Shift+中: 移動 ・Shift+ホイール: ズーム ・ホイール: 再生位置";
+                    hoverHint = (tool == Tool.Laser || selectedLaser != null || selectedPoints.Count > 0
+                            ? "矢印: 1軸移動 ・四角: 面で移動 ・点ドラッグ: 作業面で移動（Ctrl で奥行き） ・Alt: 吸着なし"
+                            : LaneHint())
+                        + " ／ 中ドラッグ: 視点を回す ・Shift+中: 移動 ・Shift+ホイール: ズーム ・ホイール: 再生位置";
                 }
 
                 break;
@@ -1253,6 +1290,20 @@ public sealed partial class ChartEditorScreen
 
         Ray ray = Ray3D(mouse);
         bool additive = current.control || current.command;
+        gizmoAnchor = null;
+
+        // The gizmo's handles come before whatever is behind them.
+        if (current.button == 0 && !additive)
+        {
+            Axes part = HitGizmo(mouse);
+            if (part != Axes.None && TryGetGizmo(out LaserPointData anchor, out _))
+            {
+                BeginDrag(DragMode.MovePoint, "Move laser points");
+                BeginPointMove3D(part, anchor, mouse);
+                return true;
+            }
+        }
+
         bool pointHit = HitLaserPoint3D(mouse, out LaserNoteData pointLaser, out int pointIndex);
         TapNoteData note = HitNote3D(ray, out bool tailHit);
         LaserNoteData lineLaser = pointHit ? null : HitLaserLine3D(mouse);
@@ -1305,10 +1356,17 @@ public sealed partial class ChartEditorScreen
                     return false;
                 }
 
-                SelectLaser(pointLaser, pointIndex);
+                LaserPointData pressed = pointLaser.points[pointIndex];
+                // Pressing one of several selected points moves them all.
+                bool group = selectedNotes.Count == 0 && (selectedPoints.Contains(pressed) || selectedLasers.Contains(pointLaser));
+                if (!group)
+                {
+                    SelectLaser(pointLaser, pointIndex);
+                }
+
                 placeLaserSide = pointLaser.side;
-                pointDragTime = false;
                 BeginDrag(DragMode.MovePoint, "Move laser point");
+                BeginPointMove3D(Axes.None, pressed, mouse);
                 return true;
             }
 
@@ -1333,11 +1391,16 @@ public sealed partial class ChartEditorScreen
                 return false;
             }
 
-            if (tool == Tool.Laser && TryHitLaserPlane(ray, out Vector2 value))
+            if (tool == Tool.Laser && TryHitPlacement(ray, out Vector2 value, out double placeTime))
             {
                 LaserNoteData target = selectedLaser != null && selectedLaser.side == placeLaserSide ? selectedLaser : null;
-                PlaceLaserPointAtCursor(placeLaserSide, target, value);
-                pointDragTime = false;
+                PlaceLaserPoint(placeLaserSide, target, value, placeTime);
+                if (selectedLaser != null && selectedPoint >= 0)
+                {
+                    // Keep dragging the new point on the work plane.
+                    BeginPointMove3D(Axes.None, selectedLaser.points[selectedPoint], mouse);
+                }
+
                 return true;
             }
         }
@@ -1431,7 +1494,7 @@ public sealed partial class ChartEditorScreen
 
             case DragMode.MovePoint:
             case DragMode.PadPoint:
-                DragPoint3D(ray);
+                DragPoints3D(mouse);
                 break;
 
             case DragMode.SetDirection:
@@ -1441,61 +1504,6 @@ public sealed partial class ChartEditorScreen
             case DragMode.Erase:
                 EraseAt3D(mouse);
                 break;
-        }
-    }
-
-    /// <summary>Drags the selected laser point across its cross-section (X / Y), or along time with Ctrl.</summary>
-    private void DragPoint3D(Ray ray)
-    {
-        LaserNoteData laser = selectedLaser;
-        if (laser == null || selectedPoint < 0 || selectedPoint >= laser.points.Length)
-        {
-            return;
-        }
-
-        int index = selectedPoint;
-        LaserPointData point = laser.points[index];
-        Vector3 world = LaserWorld(new Vector2(point.x, point.y), Z(point.time));
-        Event current = Event.current;
-        if (pointDragTime || current != null && (current.control || current.command))
-        {
-            // Along time: a plane holding the time axis that faces the camera as much as it can.
-            Vector3 normal = Mathf.Abs(camForward.y) > Mathf.Abs(camForward.x) ? Vector3.up : Vector3.right;
-            if (!new Plane(normal, world).Raycast(ray, out float distance))
-            {
-                return;
-            }
-
-            double newTime = Snap(TimeAtZ(ray.GetPoint(distance).z));
-            if (index > 0)
-            {
-                newTime = Math.Max(newTime, laser.points[index - 1].time + 0.001d);
-            }
-
-            if (index < laser.points.Length - 1)
-            {
-                newTime = Math.Min(newTime, laser.points[index + 1].time - 0.001d);
-            }
-
-            DragModify("Move laser point", () => point.time = newTime);
-            return;
-        }
-
-        if (!new Plane(Vector3.forward, world).Raycast(ray, out float enter))
-        {
-            return;
-        }
-
-        Vector3 hit = ray.GetPoint(enter);
-        float x = SnapLaserValue(hit.x / Laser3DHalfWidth);
-        float y = SnapLaserValue(hit.y / Laser3DHalfHeight);
-        if (!Mathf.Approximately(x, point.x) || !Mathf.Approximately(y, point.y))
-        {
-            DragModify("Move laser point", () =>
-            {
-                point.x = x;
-                point.y = y;
-            });
         }
     }
 

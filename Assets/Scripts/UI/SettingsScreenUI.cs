@@ -60,6 +60,9 @@ public sealed class SettingsScreenUI : MonoBehaviour
 
         /// <summary>Set for a setting that opens something instead of stepping a value.</summary>
         public Action Confirm;
+
+        /// <summary>The line under an opening setting's box.</summary>
+        public string Hint = "ENTER / A / クリックで入力";
     }
 
     private sealed class Tab
@@ -98,6 +101,7 @@ public sealed class SettingsScreenUI : MonoBehaviour
     private RectTransform content;
     private Text description;
     private NameEntryUI nameEntry;
+    private TimingCalibrationUI calibration;
     private readonly List<Tab> tabs = new List<Tab>();
     private readonly List<Card> cards = new List<Card>();
     private int tabIndex;
@@ -130,7 +134,7 @@ public sealed class SettingsScreenUI : MonoBehaviour
         close.anchoredPosition = new Vector2(-40f, -32f);
         close.GetComponent<UiPointerRelay>().Clicked = eventData =>
         {
-            if (eventData.button == PointerEventData.InputButton.Left && !nameEntry.IsOpen)
+            if (eventData.button == PointerEventData.InputButton.Left && !HasDialog)
             {
                 Close();
             }
@@ -188,6 +192,16 @@ public sealed class SettingsScreenUI : MonoBehaviour
             RefreshCards();
         };
 
+        RectTransform calibrationRect = UiKit.CreateRect(root, "Calibration");
+        UiKit.Stretch(calibrationRect);
+        calibration = calibrationRect.gameObject.AddComponent<TimingCalibrationUI>();
+        calibration.Build();
+        calibration.Closed += () =>
+        {
+            openedAt = Time.unscaledTime;
+            RefreshCards();
+        };
+
         gameObject.SetActive(false);
     }
 
@@ -210,6 +224,11 @@ public sealed class SettingsScreenUI : MonoBehaviour
             nameEntry.Close();
         }
 
+        if (calibration.IsOpen)
+        {
+            calibration.Close();
+        }
+
         gameObject.SetActive(false);
     }
 
@@ -220,12 +239,23 @@ public sealed class SettingsScreenUI : MonoBehaviour
         Tab gameplay = AddTab("ゲームプレイ", "Gameplay");
         Add(gameplay, "速度", "Hi-Speed", "ノーツとレーザーが流れてくる速さ",
             () => $"{GameSettings.HiSpeed:0.0}", steps => GameSettings.HiSpeed += steps * 0.1f, 5, "0.1", "0.5");
-        Add(gameplay, "判定タイミング", "Judge Offset", "判定タイミングの補正。遅れて押しがちなら +、早く押しがちなら −",
-            () => $"{GameSettings.JudgeOffsetMs:+0;-0;0} ms", steps => GameSettings.JudgeOffsetMs += steps, 10, "1", "10");
         Add(gameplay, "流れ方", "Approach", "加速：奥ではゆっくり、判定ラインに近づくほど速くなる（判定ラインでの速さとタイミングは一定と同じ）",
             () => GameSettings.ApproachAccelerate ? "加速" : "一定", steps => GameSettings.ApproachAccelerate = !GameSettings.ApproachAccelerate);
         Add(gameplay, "加速の強さ", "Accel Level", "流れ方が「加速」のときの奥での遅さ。大きいほど奥でゆっくりになり、その分ノーツが早くから見える",
             () => $"{GameSettings.ApproachStrength}", steps => GameSettings.ApproachStrength += steps, 3, "1", "3");
+        Add(gameplay, "判定タイミング", "Judge Offset", "判定タイミングの補正。遅れて押しがち（SLOW が多い）なら +、早く押しがち（FAST が多い）なら −",
+            () => $"{GameSettings.JudgeOffsetMs:+0;-0;0} ms", steps => GameSettings.JudgeOffsetMs += steps, 10, "1", "10");
+        Add(gameplay, "表示タイミング", "Display Offset", "ノーツを描くタイミングの補正（判定は変わらない）。音より早く見えるなら +、遅く見えるなら −",
+            () => $"{GameSettings.VisualOffsetMs:+0;-0;0} ms", steps => GameSettings.VisualOffsetMs += steps, 10, "1", "10");
+        gameplay.Settings.Add(new Setting
+        {
+            Name = "タイミング調整",
+            English = "Calibration",
+            Description = "リズムに合わせてボタンを押し、判定タイミングと表示タイミングを自動で合わせる",
+            GetValue = () => "測定する",
+            Confirm = () => calibration.Open(lineColor),
+            Hint = "ENTER / A / クリックで開始"
+        });
         Add(gameplay, "ミラー", "Mirror", "譜面の左右を反転する（次に曲を始めたときから）",
             () => OnOff(GameSettings.Mirror), steps => GameSettings.Mirror = !GameSettings.Mirror);
         Add(gameplay, "オートプレイ", "Auto Play", "自動でプレイする（ベストスコアには記録されない）",
@@ -238,6 +268,10 @@ public sealed class SettingsScreenUI : MonoBehaviour
             () => $"{GameSettings.MusicVolumePercent}", steps => GameSettings.MusicVolumePercent += steps, 10, "1", "10");
         Add(audio, "音声オフセット", "Audio Offset", "曲の音を鳴らすタイミングの補正。音がノーツより遅れて聞こえるなら −（次に曲を始めたときから）",
             () => $"{GameSettings.AudioOffsetMs:+0;-0;0} ms", steps => GameSettings.AudioOffsetMs += steps, 10, "1", "10");
+        Add(audio, "ノーツ音", "Note Sound", "ノーツを取ったときに音を鳴らす",
+            () => OnOff(GameSettings.NoteSound), steps => GameSettings.NoteSound = !GameSettings.NoteSound);
+        Add(audio, "ノーツ音の音量", "Note Sound Volume", "ノーツ音の大きさ",
+            () => $"{GameSettings.NoteSoundVolumePercent}", steps => GameSettings.NoteSoundVolumePercent += steps, 10, "1", "10");
 
         Tab graphics = AddTab("グラフィック", "Graphics");
         Add(graphics, "発光", "Bloom", "ノーツとレーザーの光のにじみの強さ。0 で消える",
@@ -519,7 +553,7 @@ public sealed class SettingsScreenUI : MonoBehaviour
 
         if (action)
         {
-            Text hint = SignKit.CreateText(card.Rect, "Hint", "ENTER / A / クリックで入力", 16, TextAnchor.MiddleCenter, SignKit.InkDim, true);
+            Text hint = SignKit.CreateText(card.Rect, "Hint", setting.Hint, 16, TextAnchor.MiddleCenter, SignKit.InkDim, true);
             UiKit.Place(hint, new Vector2(0.5f, 1f), new Vector2(0f, -160f), new Vector2(400f, 24f));
             card.Marks.Add(hint);
             return card;
@@ -633,7 +667,9 @@ public sealed class SettingsScreenUI : MonoBehaviour
 
     // ---- Input ----------------------------------------------------------------------
 
-    private bool CanTakeInput => !nameEntry.IsOpen && Time.unscaledTime - openedAt >= 0.1f;
+    private bool HasDialog => nameEntry.IsOpen || calibration.IsOpen;
+
+    private bool CanTakeInput => !HasDialog && Time.unscaledTime - openedAt >= 0.1f;
 
     private void Update()
     {

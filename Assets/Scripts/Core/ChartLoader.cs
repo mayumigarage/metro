@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 /// <summary>
@@ -207,13 +208,30 @@ public sealed class SongChartData
 }
 
 /// <summary>
-/// The song library. Every JSON TextAsset in a Resources/Charts folder is a song,
+/// The song library. Every JSON TextAsset in a Resources/Charts folder is a song, and in a
+/// build every JSON file in <see cref="UserChartsDirectory"/> too (the player's own charts),
 /// in the small JsonUtility-compatible chart format of this prototype: time is in
 /// seconds from the DSP song start and lane is 0..3.
 /// </summary>
 public sealed class ChartLoader : MonoBehaviour
 {
     public const string ResourcesFolder = "Charts";
+
+    /// <summary>
+    /// The folder the chart editor saves into: the project's Resources/Charts in the Editor,
+    /// otherwise a folder next to the saved data.
+    /// </summary>
+    public static string UserChartsDirectory
+    {
+        get
+        {
+#if UNITY_EDITOR
+            return Path.Combine(Application.dataPath, "Resources", ResourcesFolder);
+#else
+            return Path.Combine(Application.persistentDataPath, ResourcesFolder);
+#endif
+        }
+    }
 
     private readonly List<SongChartData> songs = new List<SongChartData>();
 
@@ -243,6 +261,11 @@ public sealed class ChartLoader : MonoBehaviour
             }
         }
 
+#if !UNITY_EDITOR
+        // In the Editor the user's folder is the Resources folder read above.
+        LoadUserCharts();
+#endif
+
         songs.Sort((left, right) => left.level != right.level
             ? left.level.CompareTo(right.level)
             : string.CompareOrdinal(left.title, right.title));
@@ -252,6 +275,38 @@ public sealed class ChartLoader : MonoBehaviour
             Debug.LogWarning($"No charts found in Resources/{ResourcesFolder}.", this);
         }
     }
+
+#if !UNITY_EDITOR
+    private void LoadUserCharts()
+    {
+        if (!Directory.Exists(UserChartsDirectory))
+        {
+            return;
+        }
+
+        foreach (string path in Directory.GetFiles(UserChartsDirectory, "*.json"))
+        {
+            string id = Path.GetFileNameWithoutExtension(path);
+            SongChartData chart;
+            try
+            {
+                chart = Parse(File.ReadAllText(path), id);
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                Debug.LogWarning($"Chart '{id}' could not be read: {exception.Message}", this);
+                continue;
+            }
+
+            if (chart != null)
+            {
+                // A user chart with a bundled chart's name replaces it.
+                songs.RemoveAll(song => string.Equals(song.id, id, StringComparison.OrdinalIgnoreCase));
+                songs.Add(chart);
+            }
+        }
+    }
+#endif
 
     /// <summary>Library indices of the songs in <paramref name="genre"/>, in library order (easiest first).</summary>
     public List<int> GetSongIndices(SongGenre genre)
@@ -328,6 +383,15 @@ public sealed class ChartLoader : MonoBehaviour
         return Chart;
     }
 
+    /// <summary>
+    /// Drops the angle brackets from typed text: the Text / TextMeshPro that show it would
+    /// read them as rich-text tags (&lt;br&gt; breaks the line, &lt;size&gt; resizes it).
+    /// </summary>
+    public static string RemoveTagBrackets(string text)
+    {
+        return text?.Replace("<", string.Empty).Replace(">", string.Empty);
+    }
+
     /// <summary>Parses and normalises one chart. Null if the JSON cannot be read.</summary>
     public static SongChartData Parse(string json, string id)
     {
@@ -353,6 +417,8 @@ public sealed class ChartLoader : MonoBehaviour
         }
 
         chart.id = id;
+        chart.title = RemoveTagBrackets(chart.title);
+        chart.artist = RemoveTagBrackets(chart.artist);
         if (string.IsNullOrWhiteSpace(chart.title))
         {
             chart.title = id;

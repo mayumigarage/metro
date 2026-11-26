@@ -176,7 +176,7 @@ namespace MetroEd
         {
             BeginHorizontal();
             GUILayout.Label(label, GUILayout.Width(EditorGUIUtility.labelWidth));
-            string result = GUILayout.TextField(value ?? string.Empty);
+            string result = ChartLoader.RemoveTagBrackets(GUILayout.TextField(value ?? string.Empty));
             EndHorizontal();
             return result;
         }

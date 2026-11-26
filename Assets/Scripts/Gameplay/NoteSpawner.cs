@@ -111,28 +111,30 @@ public sealed class NoteSpawner : MonoBehaviour
         }
 
         double songTime = songClock.SongTime;
+        // What is drawn follows the DISPLAY OFFSET option; the sticks and judging keep the song time.
+        double viewTime = songTime - GameSettings.VisualOffsetSeconds;
         float travelTime = TravelTimeSeconds;
-        while (nextNoteIndex < chart.notes.Length && chart.notes[nextNoteIndex].time - songTime <= travelTime)
+        while (nextNoteIndex < chart.notes.Length && chart.notes[nextNoteIndex].time - viewTime <= travelTime)
         {
             Spawn(chart.notes[nextNoteIndex], IsSimultaneous(nextNoteIndex));
             nextNoteIndex++;
         }
 
-        while (nextLaserIndex < chart.lasers.Length && chart.lasers[nextLaserIndex].StartTime - songTime <= travelTime)
+        while (nextLaserIndex < chart.lasers.Length && chart.lasers[nextLaserIndex].StartTime - viewTime <= travelTime)
         {
-            SpawnLaser(chart.lasers[nextLaserIndex], songTime, travelTime);
+            SpawnLaser(chart.lasers[nextLaserIndex], viewTime, travelTime);
             nextLaserIndex++;
         }
 
         foreach (NoteView note in activeNotes)
         {
-            note.UpdateView(GetProgress(note.TargetTime, songTime, travelTime), GetProgress(note.EndTime, songTime, travelTime));
+            note.UpdateView(GetProgress(note.TargetTime, viewTime, travelTime), GetProgress(note.EndTime, viewTime, travelTime));
         }
 
         foreach (NoteView note in heldNotes)
         {
             // The head waits on the judgement line while the rest of the body arrives.
-            note.UpdateView(1f, GetProgress(note.EndTime, songTime, travelTime));
+            note.UpdateView(1f, GetProgress(note.EndTime, viewTime, travelTime));
         }
 
         // Auto play steers the sticks along the lasers; otherwise they belong to the player.
@@ -160,7 +162,7 @@ public sealed class NoteSpawner : MonoBehaviour
             }
 
             laser.SampleInput(StickInput.Read(laser.Side), songTime);
-            laser.UpdateView(songTime, travelTime);
+            laser.UpdateView(viewTime, travelTime);
         }
     }
 

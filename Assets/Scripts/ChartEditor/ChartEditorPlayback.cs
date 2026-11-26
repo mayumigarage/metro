@@ -4,7 +4,9 @@ using UnityEngine;
 
 /// <summary>
 /// Plays the music for the chart editor and schedules a short clap on every note so the
-/// timing can be heard. Its AudioSources live on a hidden GameObject.
+/// timing can be heard, plus a metronome click on every beat of the chart's bpm (higher on the
+/// first beat of a measure). Its AudioSources live on a hidden GameObject. During the game
+/// preview it plays no music and only sounds along with the game's clock (<see cref="Follow"/>).
 ///
 /// The clock is the wall clock, pulled back onto the music's sample position whenever they
 /// drift apart, so the timeline keeps running even where there is no music (no audio, or a
@@ -25,6 +27,16 @@ public sealed class ChartEditorPlayback : IDisposable
     private readonly List<double> clapTimes = new List<double>();
     private int nextClap;
     private int nextVoice;
+    private const int TickVoices = 4;
+    private readonly AudioSource[] ticks = new AudioSource[TickVoices];
+    private AudioClip tickClip;
+    private AudioClip accentClip;
+    private int nextTickVoice;
+    // Beat n of the metronome is at beatOrigin + n * beatSeconds; every fourth one starts a measure.
+    private double beatOrigin;
+    private double beatSeconds;
+    private long nextBeat;
+    private bool following;
     private double wallSongStart;
     private double audioOffset;
 
@@ -36,6 +48,10 @@ public sealed class ChartEditorPlayback : IDisposable
 
     public float MusicVolume { get; set; } = 0.8f;
     public float ClapVolume { get; set; } = 0.6f;
+
+    public bool MetronomeEnabled { get; set; }
+
+    public float MetronomeVolume { get; set; } = 0.6f;
 
     /// <summary>Song time of the playback.</summary>
     public double SongTime => Time.realtimeSinceStartupAsDouble - wallSongStart;
@@ -67,6 +83,14 @@ public sealed class ChartEditorPlayback : IDisposable
             }
         }
 
+        PrepareSounds(fromSongTime, chart);
+        IsPlaying = true;
+        Update();
+    }
+
+    /// <summary>Lines up the claps and metronome clicks from <paramref name="fromSongTime"/> on.</summary>
+    private void PrepareSounds(double fromSongTime, SongChartData chart)
+    {
         clapTimes.Clear();
         if (chart != null && chart.notes != null)
         {
@@ -84,8 +108,35 @@ public sealed class ChartEditorPlayback : IDisposable
             nextClap++;
         }
 
-        IsPlaying = true;
-        Update();
+        beatSeconds = chart != null ? 60d / Math.Max(1f, chart.bpm) : 0.5d;
+        beatOrigin = chart != null ? chart.offset : 0d;
+        nextBeat = (long)Math.Ceiling((fromSongTime - 0.001d - beatOrigin) / beatSeconds);
+    }
+
+    /// <summary>
+    /// Claps and metronome alongside the game preview: call it every frame with the game's song
+    /// time while it runs. The music is the game's own.
+    /// </summary>
+    public void Follow(double songTime, SongChartData chart)
+    {
+        if (!following)
+        {
+            Stop();
+            EnsureHost();
+            PrepareSounds(songTime, chart);
+            following = true;
+        }
+
+        Schedule(songTime);
+    }
+
+    /// <summary>Ends <see cref="Follow"/>; does nothing when it is not running.</summary>
+    public void StopFollowing()
+    {
+        if (following)
+        {
+            Stop();
+        }
     }
 
     /// <summary>Hands the claps of the next moment to the audio system. Call it every editor frame.</summary>
@@ -106,7 +157,11 @@ public sealed class ChartEditorPlayback : IDisposable
             }
         }
 
-        double now = SongTime;
+        Schedule(SongTime);
+    }
+
+    private void Schedule(double now)
+    {
         double dspNow = AudioSettings.dspTime;
         while (nextClap < clapTimes.Count && clapTimes[nextClap] <= now + ClapLookAheadSeconds)
         {
@@ -130,17 +185,43 @@ public sealed class ChartEditorPlayback : IDisposable
             // not wait for the next editor frame.
             voice.PlayScheduled(dspNow + Math.Max(0d, time - now));
         }
+
+        while (beatOrigin + nextBeat * beatSeconds <= now + ClapLookAheadSeconds)
+        {
+            double time = beatOrigin + nextBeat * beatSeconds;
+            bool accent = ((nextBeat % 4) + 4) % 4 == 0;
+            nextBeat++;
+            if (!MetronomeEnabled || time < now - 0.02d)
+            {
+                continue;
+            }
+
+            AudioSource voice = ticks[nextTickVoice];
+            nextTickVoice = (nextTickVoice + 1) % ticks.Length;
+            voice.clip = accent ? accentClip : tickClip;
+            voice.volume = MetronomeVolume;
+            voice.PlayScheduled(dspNow + Math.Max(0d, time - now));
+        }
     }
 
     public void Stop()
     {
         IsPlaying = false;
+        following = false;
         if (music != null)
         {
             music.Stop();
         }
 
         foreach (AudioSource voice in claps)
+        {
+            if (voice != null)
+            {
+                voice.Stop();
+            }
+        }
+
+        foreach (AudioSource voice in ticks)
         {
             if (voice != null)
             {
@@ -162,9 +243,21 @@ public sealed class ChartEditorPlayback : IDisposable
             UnityEngine.Object.DestroyImmediate(clapClip);
         }
 
+        if (tickClip != null)
+        {
+            UnityEngine.Object.DestroyImmediate(tickClip);
+        }
+
+        if (accentClip != null)
+        {
+            UnityEngine.Object.DestroyImmediate(accentClip);
+        }
+
         host = null;
         music = null;
         clapClip = null;
+        tickClip = null;
+        accentClip = null;
     }
 
     private void EnsureHost()
@@ -192,10 +285,42 @@ public sealed class ChartEditorPlayback : IDisposable
             voice.clip = clapClip;
             claps[index] = voice;
         }
+
+        if (tickClip == null)
+        {
+            tickClip = CreateTickClip("ChartEditorTick", 1000f);
+            accentClip = CreateTickClip("ChartEditorAccent", 1600f);
+        }
+
+        for (int index = 0; index < ticks.Length; index++)
+        {
+            AudioSource voice = host.AddComponent<AudioSource>();
+            voice.playOnAwake = false;
+            voice.spatialBlend = 0f;
+            ticks[index] = voice;
+        }
     }
 
-    /// <summary>A short, bright tick: a decaying high sine plus a little noise.</summary>
-    private static AudioClip CreateClapClip()
+    /// <summary>The metronome's click: a short plain tone, unlike the noisy clap.</summary>
+    private static AudioClip CreateTickClip(string name, float frequency)
+    {
+        const int sampleRate = 44100;
+        const int length = sampleRate / 25;
+        float[] data = new float[length];
+        for (int index = 0; index < length; index++)
+        {
+            float time = index / (float)sampleRate;
+            data[index] = Mathf.Exp(-time * 110f) * Mathf.Sin(2f * Mathf.PI * frequency * time) * 0.9f;
+        }
+
+        AudioClip clip = AudioClip.Create(name, length, 1, sampleRate, false);
+        clip.SetData(data, 0);
+        clip.hideFlags = HideFlags.HideAndDontSave;
+        return clip;
+    }
+
+    /// <summary>A short, bright tick: a decaying high sine plus a little noise. Also the game's note sound.</summary>
+    internal static AudioClip CreateClapClip()
     {
         const int sampleRate = 44100;
         const int length = sampleRate / 20;
