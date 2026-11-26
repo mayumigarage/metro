@@ -1,6 +1,8 @@
 using System;
+using System.Collections;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Networking;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -13,7 +15,7 @@ using UnityEditor;
 /// Resources path (<c>Audio/name</c>, no extension).</item>
 /// <item>Build: Resources cannot be added at run time, so the file is copied into
 /// <c>persistentDataPath/Audio</c> and stored as <c>file:Audio/name.ext</c>. <see cref="ResolveFilePath"/>
-/// turns that back into a file path, and the editor loads it with UnityWebRequest.</item>
+/// turns that back into a file path, and the chart editor and the game load it with <see cref="LoadFile"/>.</item>
 /// </list>
 /// </summary>
 public static class AudioImport
@@ -67,13 +69,46 @@ public static class AudioImport
     /// <summary>Remembers the clip loaded from the file of a <c>file:</c> audio value, replacing the previous one.</summary>
     public static void SetFileClip(string audio, AudioClip clip)
     {
+        bool replaced = fileClip != null && fileClip != clip;
         fileClipAudio = audio;
         fileClip = clip;
+        if (replaced)
+        {
+            // A whole decompressed song: free it once nothing (chart editor, AudioSource) holds it any more.
+            Resources.UnloadUnusedAssets();
+        }
     }
 
     /// <summary>
-    /// The clip of a chart's <c>audio</c> value: a Resources clip, or for a <c>file:</c> value the clip the
-    /// chart editor has loaded. Null when there is none.
+    /// Reads the file of a <c>file:</c> audio value into a clip, over a few frames. <paramref name="done"/>
+    /// gets the clip, or null and a message saying why not. The caller decides whether to
+    /// <see cref="SetFileClip"/> it.
+    /// </summary>
+    public static IEnumerator LoadFile(string audio, Action<AudioClip, string> done)
+    {
+        string absolute = ResolveFilePath(audio);
+        if (!File.Exists(absolute))
+        {
+            done(null, "音源ファイルが見つかりません: " + audio);
+            yield break;
+        }
+
+        using UnityWebRequest request = UnityWebRequestMultimedia.GetAudioClip(new Uri(absolute).AbsoluteUri, AudioTypeOf(absolute));
+        ((DownloadHandlerAudioClip)request.downloadHandler).streamAudio = false;
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            done(null, "音源を読み込めませんでした: " + request.error);
+            yield break;
+        }
+
+        done(DownloadHandlerAudioClip.GetContent(request), null);
+    }
+
+    /// <summary>
+    /// The clip of a chart's <c>audio</c> value: a Resources clip, or for a <c>file:</c> value the clip last
+    /// loaded from that file (<see cref="LoadFile"/>). Null when there is none.
     /// </summary>
     public static AudioClip GetClip(string audio)
     {

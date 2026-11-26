@@ -7,7 +7,6 @@ using System.Text;
 using MetroEd;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.Networking;
 
 /// <summary>
 /// The chart editor screen of the game (title screen > CHART EDITOR): edits JSON charts on a vertical
@@ -1222,38 +1221,35 @@ public sealed partial class ChartEditorScreen : MonoBehaviour
 
             BuildWaveform();
         }
+        else if (audioClip != null && AudioImport.IsFileAudio(path) && AudioImport.GetClip(path) != audioClip)
+        {
+            // Playing another song since replaced the shared file clip; previews and the waveform need ours back.
+            AudioImport.SetFileClip(path, audioClip);
+        }
 
         return audioClip;
     }
 
     private IEnumerator LoadFileAudio(string audio)
     {
-        string absolute = AudioImport.ResolveFilePath(audio);
-        if (!File.Exists(absolute))
+        return AudioImport.LoadFile(audio, (clip, error) =>
         {
-            Notify("音源ファイルが見つかりません: " + audio);
-            yield break;
-        }
+            if (loadedAudioPath != audio)
+            {
+                return; // the chart changed its audio while this was loading
+            }
 
-        using UnityWebRequest request = UnityWebRequestMultimedia.GetAudioClip(new Uri(absolute).AbsoluteUri, AudioImport.AudioTypeOf(absolute));
-        ((DownloadHandlerAudioClip)request.downloadHandler).streamAudio = false;
-        yield return request.SendWebRequest();
+            if (clip == null)
+            {
+                Notify(error);
+                return;
+            }
 
-        if (loadedAudioPath != audio)
-        {
-            yield break; // the chart changed its audio while this was loading
-        }
-
-        if (request.result != UnityWebRequest.Result.Success)
-        {
-            Notify("音源を読み込めませんでした: " + request.error);
-            yield break;
-        }
-
-        audioClip = DownloadHandlerAudioClip.GetContent(request);
-        AudioImport.SetFileClip(audio, audioClip);
-        BuildWaveform();
-        Repaint();
+            audioClip = clip;
+            AudioImport.SetFileClip(audio, clip);
+            BuildWaveform();
+            Repaint();
+        });
     }
 
     /// <summary>

@@ -442,7 +442,11 @@ public sealed class GameFlow : MonoBehaviour
     private IEnumerator HoldSongIntro(int songIndex)
     {
         songIntro.BeginHold(songIntroSeconds);
-        for (float end = Time.unscaledTime + songIntroSeconds; Time.unscaledTime < end;)
+        float end = Time.unscaledTime + songIntroSeconds;
+
+        // Music imported in a build is a file: read it now, and keep the intro up until it is there.
+        yield return LoadSongAudio(chartLoader.Songs[songIndex].audio);
+        while (Time.unscaledTime < end)
         {
             yield return null;
         }
@@ -450,6 +454,30 @@ public sealed class GameFlow : MonoBehaviour
         // The song starts under the intro, which fades out over the stage.
         StartSong(songIndex);
         songIntro.FadeOut();
+    }
+
+    /// <summary>
+    /// Loads the clip of a <c>file:</c> audio value for <see cref="Play"/> (nothing to do for a Resources
+    /// clip or a clip already loaded). A file that cannot be read leaves the song silent.
+    /// </summary>
+    private IEnumerator LoadSongAudio(string audio)
+    {
+        if (!AudioImport.IsFileAudio(audio) || AudioImport.GetClip(audio) != null)
+        {
+            yield break;
+        }
+
+        yield return AudioImport.LoadFile(audio, (clip, error) =>
+        {
+            if (clip != null)
+            {
+                AudioImport.SetFileClip(audio, clip);
+            }
+            else
+            {
+                Debug.LogWarning(error, this);
+            }
+        });
     }
 
     /// <summary>
